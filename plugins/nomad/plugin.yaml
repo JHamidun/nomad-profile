@@ -12,7 +12,11 @@ license: proprietary
 provides_tools:
   - swarm_start
   - swarm_show
+  - skill_find
 provides_hooks:
   - pre_tool_call
+  - post_tool_call
   - post_api_request
   - transform_api_error_classification
+  - transform_tool_result
+  - transform_llm_output

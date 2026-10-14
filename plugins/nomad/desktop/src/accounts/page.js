@@ -18,6 +18,7 @@ import {
   openExternalSafe,
   sanitizeWhiteLabelText,
 } from './billing-tab.js'
+import { FallbackTab } from './fallback-tab.js'
 
 export const accountsModalAtom = atom(null)
 
@@ -264,6 +265,7 @@ export function AccountsPage({ ctx }) {
   const modalMode = useValue(accountsModalAtom)
 
   const [accounts, setAccounts] = useState([])
+  const [switchFeed, setSwitchFeed] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actionNotice, setActionNotice] = useState('')
@@ -300,6 +302,16 @@ export function AccountsPage({ ctx }) {
       const list = normalizeAccountsList(res)
       syncAccounts(list)
       setKeyPriority(list.length + 1)
+      if (res && Array.isArray(res.switch_feed)) {
+        setSwitchFeed(res.switch_feed)
+      } else {
+        try {
+          const feedRes = await callNomadApi(ctx, '/accounts/switch-feed')
+          if (feedRes && Array.isArray(feedRes.items)) {
+            setSwitchFeed(feedRes.items)
+          }
+        } catch (_e) {}
+      }
     } catch (err) {
       setError(
         sanitizeWhiteLabelText(
@@ -320,6 +332,16 @@ export function AccountsPage({ ctx }) {
           const list = normalizeAccountsList(res)
           syncAccounts(list)
           setKeyPriority(list.length + 1)
+          if (res && Array.isArray(res.switch_feed)) {
+            setSwitchFeed(res.switch_feed)
+          } else {
+            try {
+              const feedRes = await callNomadApi(ctx, '/accounts/switch-feed')
+              if (active && feedRes && Array.isArray(feedRes.items)) {
+                setSwitchFeed(feedRes.items)
+              }
+            } catch (_e) {}
+          }
           setError('')
         }
       } catch (err) {
@@ -648,7 +670,7 @@ export function AccountsPage({ ctx }) {
           </p>
         </div>
 
-        {/* Переключатель вкладок: «Пул аккаунтов» / «Тариф» */}
+        {/* Переключатель вкладок: «Пул аккаунтов» / «Порядок и запас» / «Тариф» */}
         <div
           role="tablist"
           aria-label="Разделы экрана аккаунтов"
@@ -663,20 +685,44 @@ export function AccountsPage({ ctx }) {
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab !== 'billing'}
+            aria-selected={activeTab === 'accounts' || (activeTab !== 'billing' && activeTab !== 'fallback')}
             onClick={() => activeAccountsTabAtom.set('accounts')}
             style={{
               padding: '7px 14px',
               borderRadius: '7px',
               border: 'none',
-              background: activeTab !== 'billing' ? 'var(--primary, #2563eb)' : 'transparent',
-              color: activeTab !== 'billing' ? '#ffffff' : 'inherit',
+              background:
+                activeTab === 'accounts' || (activeTab !== 'billing' && activeTab !== 'fallback')
+                  ? 'var(--primary, #2563eb)'
+                  : 'transparent',
+              color:
+                activeTab === 'accounts' || (activeTab !== 'billing' && activeTab !== 'fallback')
+                  ? '#ffffff'
+                  : 'inherit',
               fontSize: '13px',
               fontWeight: 600,
               cursor: 'pointer',
             }}
           >
             Пул аккаунтов ({accounts.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'fallback'}
+            onClick={() => activeAccountsTabAtom.set('fallback')}
+            style={{
+              padding: '7px 14px',
+              borderRadius: '7px',
+              border: 'none',
+              background: activeTab === 'fallback' ? 'var(--primary, #2563eb)' : 'transparent',
+              color: activeTab === 'fallback' ? '#ffffff' : 'inherit',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Порядок и запас
           </button>
           <button
             type="button"
@@ -699,9 +745,11 @@ export function AccountsPage({ ctx }) {
         </div>
       </div>
 
-      {/* Вкладка «Тариф» (M-102) */}
+      {/* Вкладка «Тариф» (M-102) и «Порядок и запас» (M-134) */}
       {activeTab === 'billing' ? (
         <BillingTab ctx={ctx} />
+      ) : activeTab === 'fallback' ? (
+        <FallbackTab ctx={ctx} />
       ) : (
         /* Вкладка «Пул аккаунтов» (M-132) */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1453,6 +1501,44 @@ export function AccountsPage({ ctx }) {
                 </tbody>
               </table>
             )}
+
+            <div
+              data-testid="accounts-switch-feed"
+              style={{
+                marginTop: '28px',
+                padding: '16px 20px',
+                borderRadius: '10px',
+                border: '1px solid var(--border, rgba(128,128,128,0.22))',
+                background: 'rgba(128,128,128,0.04)',
+              }}
+            >
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: 600 }}>
+                Лента переключений аккаунтов
+              </h3>
+              {switchFeed.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '13px', opacity: 0.7 }}>
+                  Переключений аккаунтов пока не зафиксировано.
+                </p>
+              ) : (
+                <ul
+                  data-testid="switch-feed-list"
+                  style={{
+                    margin: 0,
+                    paddingLeft: '18px',
+                    fontSize: '13px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                  }}
+                >
+                  {switchFeed.map((item, idx) => (
+                    <li key={item.id || item.api_request_id || idx} data-testid="switch-feed-item">
+                      {item.line || `${item.ts?.slice(11, 16) || ''} · ${item.provider} · ${item.status_code || 429} · активна ${item.to_slot || '#2'}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
       )}

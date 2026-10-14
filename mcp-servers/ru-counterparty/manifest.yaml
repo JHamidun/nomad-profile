@@ -1,0 +1,71 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: ru-counterparty
+description: Check a Russian counterparty before you sign — company card by INN (status, director, address, OKVED), search by name, address standardisation against ФИАС, bank details by BIC. Read-only.
+source: https://dadata.ru/api/
+
+# Runs on the install's OWN Python — the MCP SDK ships in the venv, so there is
+# no npx, no Node, and nothing to download at install time.
+#
+# ${PYTHON} is the interpreter Nomad itself runs on, substituted at install
+# time. NOT a bare `python`: the stdio child gets a filtered environment and
+# would resolve that through whatever PATH it inherits, which can be a system
+# interpreter with no MCP SDK — the server then dies at startup into a log
+# line, and the entry looks installed but has no tools.
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+  # stdio children get a filtered environment, so a value saved by the auth
+  # prompt below is invisible to this process unless it is named here. The
+  # ${...} placeholder is written into config.yaml verbatim and resolved at
+  # connect time from ~/.hermes/.env — the key itself never lands in config.yaml.
+  env:
+    DADATA_API_KEY: "${DADATA_API_KEY}"
+    DADATA_SECRET_KEY: "${DADATA_SECRET_KEY}"
+
+auth:
+  type: api_key
+  env:
+    - name: DADATA_API_KEY
+      prompt: |
+        DaData API key. Free tier, about a minute to get:
+          1. register at https://dadata.ru/ (email is enough)
+          2. open the cabinet → «API» → «Ключи доступа»
+          3. copy the value under «API-ключ»
+        The free plan covers 10 000 lookups a day, which is far past what
+        counterparty checking needs. No card required.
+      required: true
+      secret: true
+    - name: DADATA_SECRET_KEY
+      prompt: |
+        DaData secret key — OPTIONAL. Only `dadata_quota` needs it (it reads the
+        account's balance and daily usage). All four lookup tools work without.
+        Same page as the API key, under «Секретный ключ».
+      required: false
+      secret: true
+
+post_install: |
+  When to enable: you deal with Russian companies and want the agent to check
+  who you are about to sign with.
+
+  Start with `party_by_inn` and an INN. The status line comes first and is
+  flagged whenever the company is anything other than действующая — liquidation
+  and bankruptcy are the findings this exists to catch. If you only have a
+  name, `party_search` gives you the INN first; a name is not an identifier in
+  Russia and several live companies routinely share one.
+
+  Also here: `address_clean` standardises an address against ФИАС (canonical
+  spelling, postal code, FIAS id) before it goes into a contract, and
+  `bank_by_bic` returns a bank's correspondent account and status.
+
+  Read-only by design. Nothing here writes anywhere, and no tool can spend the
+  account balance beyond the cost of a query, so installing it can lose you
+  nothing.
+
+  Data comes from the same primary registers a paid counterparty service reads
+  — ЕГРЮЛ/ЕГРИП, ФИАС, справочник БИК ЦБ. What it does NOT include is the
+  arbitration-case history and the risk scoring those services layer on top.

@@ -1,0 +1,59 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: yandex-disk
+description: Read the user's Yandex.Disk — list folders, search by name, read text files, and size a folder before turning it into a knowledge base. Read-only.
+source: https://yandex.ru/dev/disk/api/
+
+# Runs on the install's OWN Python — the MCP SDK ships in the venv, so there is
+# no npx, no Node, and nothing to download at install time.
+#
+# ${PYTHON} is the interpreter Nomad itself runs on, substituted at install
+# time. NOT a bare `python`: the stdio child gets a filtered environment and
+# would resolve that through whatever PATH it inherits, which can be a system
+# interpreter with no MCP SDK — the server then dies at startup into a log
+# line, and the entry looks installed but has no tools.
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+  # The token is routed through the child env. The ${...} placeholder is written
+  # into config.yaml verbatim and resolved at connect time from ~/.hermes/.env —
+  # the token itself never lands in config.yaml. stdio children get a filtered
+  # environment, so a value saved by the auth prompt below is invisible to this
+  # process unless it is named here.
+  env:
+    YANDEX_OAUTH_TOKEN: "${YANDEX_OAUTH_TOKEN}"
+
+auth:
+  type: api_key
+  env:
+    - name: YANDEX_OAUTH_TOKEN
+      prompt: |
+        Yandex OAuth token. Get one in about a minute:
+          1. open https://oauth.yandex.ru/ and log in with the account that owns the disk
+          2. create an app, tick the permission "Доступ к папке приложения на Диске"
+             and "Чтение всего Диска" (cloud_api:disk.read)
+          3. open https://oauth.yandex.ru/authorize?response_type=token&client_id=<your app id>
+          4. copy the token out of the address bar
+        One token also covers Mail, Calendar and Metrika — the same value is
+        reused by those entries when they arrive.
+      required: true
+      secret: true
+
+post_install: |
+  When to enable: you want the agent to look inside your Yandex.Disk — find a
+  document, read a note, or inventory a folder before building a knowledge base
+  from it.
+
+  Read-only by design. This entry cannot upload, move or delete anything, so
+  installing it can lose you nothing. Writing is a separate entry.
+
+  Start with `disk_inventory` on a folder: it answers how many files and how
+  many bytes are there, broken down by type, without dumping the tree into the
+  conversation. That is the number you need before agreeing to process it.
+
+  If the token expires you will see a plain "Yandex rejected the token (401)" —
+  re-issue it and run `nmd mcp install yandex-disk` again.

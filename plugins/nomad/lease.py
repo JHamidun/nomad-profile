@@ -10,14 +10,17 @@ tool-шаг), ядро Hermes не спавнило — значит у неё �
 Четыре правила, которые реализует модуль:
 
 1. claim берётся из процесса дирижёра с claimer'ом ``<host>:nomad-<lane>``. Префикс
-   ``<host>:`` обязателен (без него апстрим считает claim чужим), а хвост привязан к ДОРОЖКЕ,
-   не к pid — чтобы тот же claimer продолжал аренду после перезапуска gateway.
+   ``<host>:`` совпадает с ``kanban_db._host_prefix()`` (``_is_foreign_claim``), а хвост
+   привязан к ДОРОЖКЕ, не к pid — чтобы тот же claimer продолжал аренду после перезапуска
+   gateway (сам по себе префикс ``<host>:`` аренду при ``pid IS NULL`` не продлевает;
+   предохранитель для зависших ``running`` — ``detect_stale_running`` и
+   ``dispatch_stale_timeout_seconds``).
 2. Петля продления зовёт ``heartbeat_claim`` тем же claimer'ом не реже чем раз в TTL/3 и
    вместе с ним ``heartbeat_worker``. Первый двигает ``claim_expires``; второй — только
    ``last_heartbeat_at``, но без него карточку снимет детектор «нет пульса»
    (``detect_stale_running``: по умолчанию 4 ч работы и час без пульса).
-3. TTL передаётся явно из конфигурации; скрытого значения по умолчанию нет. Модуль
-   сам говорит, с каким TTL работает (:meth:`LeaseKeeper.describe`).
+3. TTL передаётся явно из конфигурации (``nomad.lease.claim_ttl_s``); скрытого значения по
+   умолчанию нет. Модуль сам говорит, с каким TTL работает (:meth:`LeaseKeeper.describe`).
 4. После перезапуска дирижёра :meth:`LeaseKeeper.reacquire` заново берёт аренду на живые
    внешние карточки под тем же claimer'ом.
 
@@ -27,6 +30,10 @@ tool-шаг), ядро Hermes не спавнило — значит у неё �
 ``release_stale_claims``); он спрятан за ``kanban.host_prefix()`` и записан с заменой в
 docs/core-symbols.md.
 """
+
+# nomad-workaround: PR-5 (docs/upstream-prs.md)
+# До появления публичного продления внешней аренды без worker_pid в ядре Hermes (PR-5)
+# LeaseKeeper циклически обновляет claim_expires через heartbeat_claim и host_prefix.
 
 from __future__ import annotations
 
@@ -111,6 +118,14 @@ class LeaseConfig:
     ttl_seconds: int
     renew_interval_seconds: float
 
+    @property
+    def claim_ttl_s(self) -> int:
+        return self.ttl_seconds
+
+    @property
+    def claim_ttl_seconds(self) -> int:
+        return self.ttl_seconds
+
     def __post_init__(self) -> None:
         ttl = self.ttl_seconds
         if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < MIN_TTL_SECONDS:
@@ -129,17 +144,35 @@ class LeaseConfig:
 
     @classmethod
     def from_mapping(cls, cfg: Mapping[str, Any]) -> LeaseConfig:
-        """Читает секцию конфига: ``claim_ttl_seconds`` обязателен, без запасного значения.
+        """Читает секцию конфига: ``claim_ttl_s`` (или ``claim_ttl_seconds``) обязателен,
+        без запасного значения. Принимает как саму секцию ``lease``, так и корневой
+        словарь ``config.yaml`` с путём ``nomad.lease.claim_ttl_s``.
 
-        ``renew_interval_seconds`` необязателен и тогда выводится как TTL/3 — это не
-        скрытое умолчание, а само правило 2, посчитанное от явно заданного TTL.
+        ``renew_interval_s`` / ``renew_interval_seconds`` необязателен и тогда выводится как
+        TTL/3 — это не скрытое умолчание, а само правило 2, посчитанное от явно заданного TTL.
         """
-        if "claim_ttl_seconds" not in cfg:
+        if not isinstance(cfg, Mapping):
             raise LeaseConfigError(
-                "claim_ttl_seconds is required in the lease config (no hidden default: "
-                "spec §2.4 rule 3)"
+                "nomad.lease.claim_ttl_s (claim_ttl_seconds) is required in the lease config "
+                "(no hidden default: spec §2.4 rule 3)"
             )
-        raw_ttl = cfg["claim_ttl_seconds"]
+        section: Mapping[str, Any] = cfg
+        if "claim_ttl_s" not in section and "claim_ttl_seconds" not in section:
+            nomad_sub = section.get("nomad")
+            if isinstance(nomad_sub, Mapping):
+                section = nomad_sub
+            lease_sub = section.get("lease")
+            if isinstance(lease_sub, Mapping):
+                section = lease_sub
+        if "claim_ttl_s" in section:
+            raw_ttl = section["claim_ttl_s"]
+        elif "claim_ttl_seconds" in section:
+            raw_ttl = section["claim_ttl_seconds"]
+        else:
+            raise LeaseConfigError(
+                "nomad.lease.claim_ttl_s (claim_ttl_seconds) is required in the lease config "
+                "(no hidden default: spec §2.4 rule 3)"
+            )
         # Целое число или строка из цифр (значение из окружения). 900.5 и True — ошибка,
         # а не «округлим»: TTL задаётся осознанно.
         if isinstance(raw_ttl, int) and not isinstance(raw_ttl, bool):
@@ -147,11 +180,21 @@ class LeaseConfig:
         elif isinstance(raw_ttl, str) and raw_ttl.strip().isdigit():
             ttl = int(raw_ttl.strip())
         else:
-            raise LeaseConfigError(f"claim_ttl_seconds is not an integer: {raw_ttl!r}")
-        raw_interval = cfg.get("renew_interval_seconds")
+            raise LeaseConfigError(
+                f"nomad.lease.claim_ttl_s (claim_ttl_seconds) is not an integer: {raw_ttl!r}"
+            )
+        raw_interval = (
+            section.get("renew_interval_s")
+            if "renew_interval_s" in section
+            else section.get("renew_interval_seconds")
+        )
         if raw_interval is None:
             interval = ttl / 3
         else:
+            if isinstance(raw_interval, bool):
+                raise LeaseConfigError(
+                    f"renew_interval_seconds is not a number: {raw_interval!r}"
+                )
             try:
                 interval = float(raw_interval)
             except (TypeError, ValueError) as exc:

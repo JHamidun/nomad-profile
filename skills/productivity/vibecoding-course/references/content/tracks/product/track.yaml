@@ -1,0 +1,74 @@
+# Трек роли «Продакт-менеджер». Читают course-driver / course-check.
+# Порядок миссий = порядок файлов (m03 → m04 → m05 → m06 → project).
+version: 1
+track: product
+title: Продакт-менеджер
+requires: _core   # сначала фундамент: m00–m02 общего трека
+description: >
+  Продуктовая петля руками агента: сырой фидбек → инсайты и бэклог →
+  проверяемая гипотеза → кликабельный прототип → дашборд метрик —
+  и финальный проект, где всё это собирается в MVP для product-совета.
+
+missions:
+  - id: m03-feedback-to-backlog
+    file: m03-feedback-to-backlog.md
+    title: Гора фидбека → бэклог с приоритетами
+    goal: Превращать сырой пользовательский фидбек в кластеры боли и приоритизированный бэклог по RICE — за один заход с агентом.
+    est_minutes: 30-45
+    criteria:
+      - sandbox/feedback/reviews.md — исходные отзывы (обезличенные или помеченные как тренировочные)
+      - sandbox/feedback/insights.md — 5–8 кластеров по боли, с числом упоминаний и цитатами
+      - sandbox/feedback/backlog.md — таблица RICE (Reach, Impact, Confidence, Effort, Score), отсортирована по Score
+      - ученик объясняет топ-1 бэклога цифрами кластеров
+
+  - id: m04-hypothesis-fake-door
+    file: m04-hypothesis-fake-door.md
+    title: Гипотеза, которую можно завалить
+    goal: Формулировать проверяемую гипотезу с метрикой решения и собирать инструмент проверки — fake-door страницу с кастдев-опросником.
+    est_minutes: 40-60
+    criteria:
+      - sandbox/discovery/hypothesis.md — гипотеза по формату (включая «Метрика решения» и порог)
+      - sandbox/discovery/index.html — страница ценности с формой-опросником, открывается локально
+      - вопросы опросника — про прошлое поведение (Mom Test), не «понравится ли вам»
+
+  - id: m05-clickable-prototype
+    file: m05-clickable-prototype.md
+    title: Кликабельный прототип вместо макета
+    goal: Собирать с агентом кликабельный прототип фичи — экраны, переходы, пустое состояние, реалистичные данные — и готовить сценарий юзертеста.
+    est_minutes: 45-60
+    criteria:
+      - sandbox/prototype/ — минимум 2 экрана, связанных ссылками; основной путь кликается
+      - есть пустое состояние (первый вход пользователя)
+      - sandbox/prototype/usertest.md — 3 задания юзертеста и что наблюдаем
+      - данные в прототипе реалистичные, не lorem ipsum
+
+  - id: m06-metrics-dashboard
+    file: m06-metrics-dashboard.md
+    title: Дашборд метрик без аналитика
+    goal: Определять North Star и воронку продукта и собирать офлайн-дашборд из выгрузки — с запечёнными данными, без внешних зависимостей.
+    est_minutes: 45-60
+    criteria:
+      - sandbox/metrics/METRICS.md — North Star + воронка из 3–5 шагов с определениями
+      - sandbox/metrics/data.csv — выгрузка (реальная обезличенная или сгенерированная)
+      - sandbox/metrics/dashboard.html — открывается из файла без интернета
+      - ученик называет одну находку в данных и решение по ней
+
+final_project:
+  id: project
+  file: project.md
+  title: "MVP + дашборд: пакет для product-совета"
+  goal: >
+    Под ведением агента собрать кликабельный MVP-прототип своей фичи и
+    дашборд продуктовых метрик к нему: план → сборка по шагам → git →
+    5-минутное демо (деплой — опционально).
+  est_minutes: 90-120
+  criteria:
+    - sandbox/mvp/PLAN.md — план из 4–6 проверяемых шагов
+    - sandbox/mvp/index.html + экраны — кликабельный MVP с основным путём и пустым состоянием
+    - sandbox/mvp/dashboard.html — дашборд метрик именно этого MVP (North Star, воронка, пороги успеха)
+    - sandbox/mvp/DEMO.md — сценарий демо на 5 минут (гипотеза → путь → метрики → просьба к совету)
+    - git-история минимум из 2 коммитов
+    - ученик прогоняет демо целиком
+
+pass_threshold_default: 70
+knowledge: .course/knowledge/product

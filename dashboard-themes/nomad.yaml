@@ -1,0 +1,71 @@
+# Тема дашборда Nomad (задача M-074 / B7). Кладётся в <hermes home>/dashboard-themes/nomad.yaml.
+#
+# Схема читается hermes_cli/web_server_dashboard.py:_discover_user_themes →
+# _normalise_theme_definition (:327-421) и внедряется на старте в index.html через
+# _render_active_theme_bootstrap_css (:210-255), когда в config.yaml задано dashboard.theme: nomad.
+#
+# Палитра совпадает с package/skins/nomad.yaml и apps/desktop/src/themes/presets.ts (nousTheme.darkColors):
+#   #05071C NAVY_DEEP · #14121E NAVY_CARD · #1F2350 NAVY_RAISED · #EEF1FB текст · #A6AAC6 текст тусклый
+#   #29A9FF sky · #4FC0FF sky-lit · #2D2FE8 NOMAD_DEEP (identity) · #CC7357 коралл (рационированный)
+#   #262A3A волосяная линия · #D9534F опасность · #4caf50 успех
+name: nomad
+label: Nomad
+description: Nomad — ночное небо над дюнами
+
+palette:
+  background:
+    hex: "#05071C"
+    alpha: 1.0
+  midground:
+    hex: "#29A9FF"
+    alpha: 1.0
+  foreground:
+    hex: "#EEF1FB"
+    alpha: 0.0
+  warmGlow: "rgba(41, 169, 255, 0.28)"
+  noiseOpacity: 0.75
+
+typography:
+  fontSans: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+  fontMono: 'ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace'
+  baseSize: "15px"
+  lineHeight: "1.55"
+  letterSpacing: "0"
+
+layout:
+  radius: "0.5rem"
+  density: "comfortable"
+
+layoutVariant: "standard"
+
+colorOverrides:
+  card: "#14121E"
+  cardForeground: "#EEF1FB"
+  popover: "#14121E"
+  popoverForeground: "#EEF1FB"
+  primary: "#29A9FF"
+  primaryForeground: "#05071C"
+  secondary: "#1F2350"
+  secondaryForeground: "#EEF1FB"
+  muted: "#1F2350"
+  mutedForeground: "#A6AAC6"
+  accent: "#2D2FE8"
+  accentForeground: "#EEF1FB"
+  destructive: "#D9534F"
+  destructiveForeground: "#EEF1FB"
+  success: "#4caf50"
+  warning: "#CC7357"
+  border: "#262A3A"
+  input: "#05071C"
+  ring: "#4FC0FF"
+
+componentStyles:
+  header:
+    background: "#05071C"
+    borderColor: "#262A3A"
+  sidebar:
+    background: "#05071C"
+    borderColor: "#262A3A"
+  card:
+    background: "#14121E"
+    borderColor: "#262A3A"

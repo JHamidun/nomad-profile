@@ -1,0 +1,65 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: bitrix24
+description: Read a Bitrix24 portal — deals, contacts, companies, and any other read-only REST method — through an inbound webhook. No app registration. Read-only, enforced in the connector.
+source: https://apidocs.bitrix24.ru/
+
+# Runs on the install's own Python; the MCP SDK ships in the venv.
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+  env:
+    BITRIX_WEBHOOK_URL: "${BITRIX_WEBHOOK_URL}"
+
+auth:
+  type: api_key
+  env:
+    - name: BITRIX_WEBHOOK_URL
+      prompt: |
+        Bitrix24 inbound webhook URL. Your portal admin makes it in about a minute:
+          1. in Bitrix24 open  Разработчикам → Другое → Входящий вебхук
+          2. tick the access you want the agent to have — at minimum CRM (crm),
+             and "Пользователи (базовый)" (user_basic) so it can say who it is
+          3. save, then copy the generated URL
+        It looks like:  https://<портал>.bitrix24.ru/rest/1/xxxxxxxxxxxxxxxx/
+        Paste the whole thing, including the trailing slash.
+
+        The URL IS the credential — anyone holding it has the rights of the
+        person who created it. Make it under an account with the narrowest
+        access that still answers your questions.
+      required: true
+      secret: true
+
+post_install: |
+  CHECK THE PLAN FIRST. Bitrix24's REST API is gated behind a paid tariff —
+  Bitrix states it "доступна на платных тарифах Битрикс24", and local
+  applications and webhooks additionally need the Marketplace subscription.
+  On a free portal every call here fails no matter how correct the webhook is,
+  so confirm the plan BEFORE promising anyone this works.
+
+  Rate limits are low: 2 requests/second (5 on Enterprise), burst 50 (250 on
+  Enterprise). Over them you get 503 QUERY_LIMIT_EXCEEDED or 429
+  OPERATION_TIME_LIMIT — so ask for filtered slices, not whole tables.
+
+  When to enable: you want the agent to answer questions about your CRM —
+  "what is stuck in the funnel", "who has not been contacted since May",
+  "find every deal with this company" — against the live portal.
+
+  Read-only, and not merely by convention: the connector checks the method name
+  against an allow-list before it builds the request, so anything ending in
+  .add / .update / .delete / .set is refused inside this process even when the
+  webhook itself has full admin rights. An inbound webhook normally carries
+  whatever the person who made it can do, and that is not a thing to hand a
+  model by default.
+
+  Run `bitrix_whoami` first — it proves the URL works and tells you which user
+  the agent is acting as. Then `bitrix_scope` shows what that webhook may read;
+  a webhook made without the CRM scope will fail the deal tools, and it is
+  better to see that immediately than to read it as "the CRM is empty".
+
+  For anything without a dedicated tool, `bitrix_read` takes a method name and
+  a JSON params object — same guard applies.

@@ -61,12 +61,21 @@ PROVIDER_NAME = "NomadNet"
 CP_URL_ENV = "NOMADNET_CP_URL"
 # plugins.entries.<id>.settings.cp_url — то место, которое ядро отдаёт плагину через
 # ctx.get_config("cp_url"); порядок «переменная → настройка» задан бэклогом (W2-04a).
+# В поставке профиля боевой адрес по умолчанию живёт в config.yaml (nomad.control_plane_url, M-068).
 CP_URL_SETTING = ("plugins", "entries", "nomad", "settings", "cp_url")
+CP_URL_CONFIG_PATHS: Tuple[Tuple[str, ...], ...] = (
+    CP_URL_SETTING,
+    ("nomad", "control_plane_url"),
+    ("nomad", "cp_url"),
+)
 
-# Первая из этих моделей, что есть в каталоге CP, становится моделью по умолчанию. Все четыре —
-# прямые маршруты CP (app/gateway/registry.py:28,32,50,60); deepseek-chat там — публичный алиас
-# deepseek-v4-flash без thinking, по той же цене.
+# Первая из этих моделей, что есть в каталоге CP, становится моделью по умолчанию. Первым стоит
+# балансирующий алиас CP ``nomadnet-auto`` (M-236), далее — прямые маршруты CP
+# (app/gateway/registry.py:28,32,50,60) на случай старого CP без алиаса; ``deepseek-chat`` там —
+# публичный алиас ``deepseek-v4-flash`` без thinking, по той же цене.
+FALLBACK_MODEL = "deepseek-chat"
 MODEL_PREFERENCE: Tuple[str, ...] = (
+    "nomadnet-auto",
     "deepseek-chat",
     "gpt-4o-mini",
     "claude-haiku-4-5",
@@ -149,16 +158,23 @@ def normalize_cp_url(raw: str) -> Optional[str]:
 
 
 def _setting_cp_url() -> str:
-    node: Any = core.load_config()
-    for segment in CP_URL_SETTING:
-        if not isinstance(node, dict):
-            return ""
-        node = node.get(segment)
-    return node.strip() if isinstance(node, str) else ""
+    cfg: Any = core.load_config()
+    if not isinstance(cfg, dict):
+        return ""
+    for path in CP_URL_CONFIG_PATHS:
+        node: Any = cfg
+        for segment in path:
+            if not isinstance(node, dict):
+                node = None
+                break
+            node = node.get(segment)
+        if isinstance(node, str) and node.strip():
+            return node.strip()
+    return ""
 
 
 def resolve_cp_url() -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """``(origin, None)`` or ``(None, error)``: env ``NOMADNET_CP_URL`` → plugin setting ``cp_url``.
+    """``(origin, None)`` or ``(None, error)``: env ``NOMADNET_CP_URL`` → ``config.yaml`` setting.
 
     ``get_env_value`` ядра читает окружение процесса с учётом области профиля, а при промахе —
     ``.env`` профиля. Пустая строка — то же, что не задано: установка профиля кладёт в .env
@@ -247,13 +263,15 @@ def probe_key(cp_url: str, key: str) -> Dict[str, Any]:
 
 
 def pick_default_model(catalogue: Optional[List[str]]) -> Optional[str]:
-    """First preferred model the CP offers; the launch default when the catalogue was unreadable.
+    """First preferred model the CP offers; the direct launch default when the catalogue was unreadable.
 
-    Ключ уже принят, поэтому сбой каталога не должен останавливать покупателя. Читаемый каталог
-    без единой модели из списка — это ``None`` (отказ ``no-models``), а не ``catalogue[0]``.
+    Ключ уже принят, поэтому сбой каталога не должен останавливать покупателя: возвращаем первую
+    гарантированно прямую модель (``FALLBACK_MODEL = 'deepseek-chat'``), а не виртуальный алиас
+    ``nomadnet-auto`` (M-236). Читаемый каталог без единой модели из списка — это ``None``
+    (отказ ``no-models``), а не ``catalogue[0]``.
     """
     if catalogue is None:
-        return MODEL_PREFERENCE[0]
+        return FALLBACK_MODEL
     offered = set(catalogue)
     return next((m for m in MODEL_PREFERENCE if m in offered), None)
 
@@ -319,6 +337,10 @@ def _point_model_at_cp(cfg: Dict[str, Any], base_url: str, model_id: str) -> Non
     for stale in ("key_env", "api_key_env", "api", "api_mode"):
         model.pop(stale, None)
     model["api_key"] = KEY_REF
+    if model_id == "nomadnet-auto":
+        model["reasoning_echo"] = True
+    else:
+        model.pop("reasoning_echo", None)
     cfg["model"] = model
 
     # Одна запись NomadNet: прежние записи с тем же адресом или тем же именем (адрес CP мог
@@ -331,6 +353,25 @@ def _point_model_at_cp(cfg: Dict[str, Any], base_url: str, model_id: str) -> Non
                       "model": model_id})
     cfg["custom_providers"] = providers
 
+    # M-097: в режиме NomadNet обнуляем fallback_providers и переводим вспомогательные задачи
+    # (compression, vision) на основной маршрут CP (`provider: main`), убирая старые указатели
+    # на openrouter.ai / deepseek, чтобы цепочка автопоиска вспомогательного клиента и
+    # ContextCompressor не уходила наружу мимо CP.
+    cfg["fallback_providers"] = []
+    aux = cfg.get("auxiliary")
+    if not isinstance(aux, dict):
+        aux = {}
+    for task_name in ("compression", "vision"):
+        existing = aux.get(task_name)
+        cleaned: Dict[str, Any] = {}
+        if isinstance(existing, dict):
+            for k, v in existing.items():
+                if k not in ("provider", "base_url", "model", "key_env", "api_key", "api_key_env", "api_mode"):
+                    cleaned[k] = v
+        cleaned["provider"] = "main"
+        aux[task_name] = cleaned
+    cfg["auxiliary"] = aux
+
 
 def _verify_on_disk(config_path: Path, base_url: str, model_id: str) -> None:
     import yaml
@@ -341,9 +382,23 @@ def _verify_on_disk(config_path: Path, base_url: str, model_id: str) -> None:
             and str(model.get("base_url") or "").rstrip("/") == base_url
             and model.get("api_key") == KEY_REF and model.get("default") == model_id):
         raise _NotSaved("config.yaml does not point the model at the CP after save")
+    if model_id == "nomadnet-auto":
+        if model.get("reasoning_echo") is not True:
+            raise _NotSaved("config.yaml has no model.reasoning_echo: true for nomadnet-auto")
+    else:
+        if "reasoning_echo" in model:
+            raise _NotSaved("config.yaml unexpectedly has reasoning_echo for non-auto model")
     entries = [p for p in raw.get("custom_providers") or [] if _is_nomadnet_entry(p, base_url)]
     if len(entries) != 1 or entries[0].get("key_env") != KEY_ENV:
         raise _NotSaved("config.yaml has no single NomadNet custom provider after save")
+    if raw.get("fallback_providers") != []:
+        raise _NotSaved("config.yaml does not clear fallback_providers after save")
+    aux = raw.get("auxiliary") if isinstance(raw.get("auxiliary"), dict) else {}
+    for task_name in ("compression", "vision"):
+        task_cfg = aux.get(task_name)
+        if not (isinstance(task_cfg, dict) and task_cfg.get("provider") == "main"
+                and not task_cfg.get("base_url") and not task_cfg.get("key_env")):
+            raise _NotSaved(f"config.yaml does not point auxiliary.{task_name} at main after save")
 
 
 def _apply(key: str, base_url: str, model_id: str) -> None:
@@ -359,7 +414,7 @@ def _apply(key: str, base_url: str, model_id: str) -> None:
             raise _NotSaved(f"{KEY_ENV} did not land in .env")
         cfg = core.load_config()
         _point_model_at_cp(cfg, base_url, model_id)
-        core.save_config(cfg)
+        core.save_config(cfg, preserve_keys={("fallback_providers",)})
         _verify_on_disk(config_path, base_url, model_id)
     except BaseException:
         _restore_bytes(env_path, saved_env)
@@ -490,6 +545,38 @@ def connection_status() -> Dict[str, Any]:
     return {"connected": connected, "provider": PROVIDER_NAME if connected else None,
             "model": str(model.get("default") or "") or None, "base_url": base_url or None,
             "cp_url": cp_url, "key_present": key_present}
+
+
+def deactivate() -> Dict[str, Any]:
+    """Deactivate NomadNet provider and cleanly restore model configuration."""
+    with _APPLY_LOCK:
+        cfg = core.load_config() or {}
+        model = cfg.get("model")
+        if isinstance(model, dict):
+            model.pop("reasoning_echo", None)
+            if model.get("provider") == "custom":
+                model.pop("provider", None)
+                model.pop("base_url", None)
+                model.pop("api_key", None)
+                model.pop("default", None)
+            cfg["model"] = model
+
+        providers = cfg.get("custom_providers")
+        if isinstance(providers, list):
+            cfg["custom_providers"] = [
+                p for p in providers
+                if not (isinstance(p, dict) and p.get("name") == PROVIDER_NAME)
+            ]
+
+        core.save_config(cfg)
+        try:
+            core.save_env_value(KEY_ENV, "")
+        except Exception:
+            pass
+        core.invalidate_env_cache()
+        os.environ.pop(KEY_ENV, None)
+    return {"ok": True, "message": "NomadNet отключён."}
+
 
 
 # ---------------------------------------------------------------------------

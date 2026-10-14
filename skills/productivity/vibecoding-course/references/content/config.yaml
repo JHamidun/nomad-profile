@@ -1,0 +1,71 @@
+# Конфиг курса вайбкодинга. Читают процедуры course-driver / course-check / course-role.
+# Адаптировано для Nomad (раздел «Симулятор ИИ»): контент курса лежит в самом скилле
+# (read-only), прогресс ученика — в домашней папке Nomad (writable). См. блок `paths` ниже.
+version: 1
+course: vibecoding
+language: ru
+
+# Порядок прохождения: сначала общий фундамент, потом трек выбранной роли.
+order:
+  - _core
+  - "{role}"
+
+# Роли ученика. key = имя папки трека в tracks/, example — затравки для
+# персонализации сценариев (наставник переводит миссии на язык роли).
+roles:
+  - key: marketer
+    title: Маркетолог
+    example: "лендинг под кампанию, UTM-разметка, разбор выдачи конкурентов"
+  - key: product
+    title: Продакт-менеджер
+    example: "кликабельный прототип фичи, дашборд метрик, опросник для кастдева"
+  - key: project
+    title: Проджект-менеджер
+    example: "трекер статусов, генератор отчётов по шаблону, автоматизация рутины"
+  - key: founder
+    title: Фаундер
+    example: "MVP за выходные, лендинг с формой заявки, демо для инвестора"
+  - key: analyst
+    title: Аналитик
+    example: "скрипт очистки данных, визуализация, отчёт, который собирается сам"
+  - key: sales
+    title: Продажи
+    example: "калькулятор КП, страница-визитка оффера, разбор базы лидов"
+  - key: hr
+    title: HR
+    example: "страница вакансии, скрининг-опросник, разбор откликов"
+  - key: ops
+    title: Операции
+    example: "чек-лист процесса, генератор документов, мини-учёт в таблице"
+  - key: designer
+    title: Дизайнер
+    example: "живой прототип вместо статичного макета, дизайн-токены в коде"
+
+# Порог зачёта миссии по умолчанию (если в миссии не указан свой).
+pass_threshold_default: 70
+
+# Проверка миссий. По умолчанию — офлайн, локально, без сети.
+grader:
+  online: false        # true — если есть доступ к grader академии
+  endpoint: ""         # URL grader'а; пусто = только локальная проверка
+
+# Маяк завершения — тихий сигнал академии «участник прошёл трек».
+# В Nomad-порте ВЫКЛЮЧЕН по умолчанию: открытое решение по 152-ФЗ у владельца.
+# Пока enabled=false и url пуст, driver НЕ спрашивает и НЕ отправляет имя/email/телеграм.
+completion_beacon:
+  enabled: false       # true — слать сигнал о завершении трека
+  url: ""              # POST-эндпоинт академии; пусто = никуда не шлём
+
+# Пути. В Nomad контент курса (tracks/knowledge/config) — read-only внутри скилла,
+# прогресс ученика (state.json/identity.json/sandbox) — в домашней папке Nomad.
+#   CONTENT_DIR = ${HERMES_SKILL_DIR}/references/content   (этот файл лежит здесь)
+#   COURSE_HOME = <Nomad home>/vibecoding-course           (см. scripts/_course_home.py)
+paths:
+  # read-only (относительно CONTENT_DIR):
+  tracks: tracks
+  knowledge: knowledge
+  state_example: state.example.json
+  # writable (относительно COURSE_HOME):
+  state: state.json
+  identity: identity.json
+  sandbox: sandbox

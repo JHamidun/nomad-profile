@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
-import { PALETTE_AREA, atom, host } from '@hermes/plugin-sdk'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { PALETTE_AREA, ROUTES_AREA, atom, host } from '@hermes/plugin-sdk'
 
 export const activeAccountsTabAtom = atom('accounts')
 export const accountsSummaryAtom = atom({
@@ -9,8 +9,44 @@ export const accountsSummaryAtom = atom({
   loaded: false,
 })
 
+export const BILLING_STATES = {
+  NO_KEY: 'no_key',
+  NETWORK_ERROR: 'network_error',
+  INSUFFICIENT_FUNDS: 'insufficient_funds',
+  CP_ERROR: 'cp_error',
+  ACTIVE_OK: 'active_ok',
+}
+
+export const BILLING_MESSAGES = {
+  [BILLING_STATES.NO_KEY]: {
+    title: 'Ключ NomadNet не подключён',
+    description:
+      'Вы ещё не подключили персональный ключ NomadNet. Введите ключ вида nmd_... для автоматической маршрутизации запросов к моделям и синхронизации счёта.',
+    actionLabel: 'Подключить ключ',
+  },
+  [BILLING_STATES.NETWORK_ERROR]: {
+    title: 'Нет связи с сервером NomadNet',
+    description:
+      'Не удалось связаться с сервером тарифов и баланса NomadNet. Проверьте подключение к сети и повторите попытку.',
+    actionLabel: 'Повторить попытку',
+  },
+  [BILLING_STATES.INSUFFICIENT_FUNDS]: {
+    title: 'На вашем счёте исчерпан баланс номадов (ошибка 402)',
+    description:
+      'Для продолжения отправки запросов к нейросетям вам необходимо пополнить баланс в личном кабинете NomadNet.',
+    actionLabel: 'Пополнить баланс',
+  },
+  [BILLING_STATES.CP_ERROR]: {
+    title: 'Сервер шлюза NomadNet сообщил об ошибке (ошибка CP)',
+    description:
+      'Шлюз управления Control Plane временно недоступен или вернул непредвиденный ответ. Пожалуйста, повторите попытку позже.',
+    actionLabel: 'Проверить статус',
+  },
+}
+
 export function openNomadAccountsTab(tab = 'accounts') {
-  activeAccountsTabAtom.set(tab === 'billing' ? 'billing' : 'accounts')
+  const nextTab = tab === 'billing' ? 'billing' : tab === 'fallback' ? 'fallback' : 'accounts'
+  activeAccountsTabAtom.set(nextTab)
   if (host && typeof host.navigate === 'function') {
     host.navigate('/nomad-accounts')
   }
@@ -57,7 +93,9 @@ export async function callNomadApi(ctx, path, options = {}) {
       body,
     })
     if (!response.ok) {
-      throw new Error(`Ошибка запроса (${response.status})`)
+      const errorObj = new Error(`Ошибка запроса (${response.status})`)
+      errorObj.status = response.status
+      throw errorObj
     }
     return await response.json()
   }
@@ -76,13 +114,13 @@ export function openExternalSafe(ctx, url) {
   }
 }
 
-function formatNomadsNumber(value) {
+export function formatNomadsNumber(value) {
   const num = Number(value)
   if (!Number.isFinite(num)) return '0'
   return num.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 }
 
-function formatDateTimeRu(isoString) {
+export function formatDateTimeRu(isoString) {
   if (!isoString) return 'Не указано'
   const date = new Date(isoString)
   if (Number.isNaN(date.getTime())) return sanitizeWhiteLabelText(String(isoString))
@@ -95,12 +133,67 @@ function formatDateTimeRu(isoString) {
   })
 }
 
-const DEFAULT_CABINET_URL = 'https://nomadnet.ru/cabinet/billing'
+export const DEFAULT_CABINET_URL = 'https://nomadnet.ru/cabinet/billing'
 
-export function BillingTab({ ctx }) {
-  const [accountData, setAccountData] = useState(null)
-  const [loading, setLoading] = useState(true)
+export function determineBillingState(accountData, error, statusCode) {
+  if (error) {
+    const errLow = String(error).toLowerCase()
+    if (
+      statusCode === 402 ||
+      errLow.includes('402') ||
+      errLow.includes('insufficient') ||
+      errLow.includes('недостаточно средств')
+    ) {
+      return BILLING_STATES.INSUFFICIENT_FUNDS
+    }
+    if (
+      statusCode === 0 ||
+      errLow.includes('network') ||
+      errLow.includes('failed to fetch') ||
+      errLow.includes('econnrefused') ||
+      errLow.includes('сеть') ||
+      errLow.includes('соединени')
+    ) {
+      return BILLING_STATES.NETWORK_ERROR
+    }
+    return BILLING_STATES.CP_ERROR
+  }
+
+  if (!accountData) {
+    return BILLING_STATES.NO_KEY
+  }
+
+  const isConnected = Boolean(
+    accountData.connected ||
+      accountData.key_configured ||
+      accountData.masked_key ||
+      accountData.key_preview
+  )
+
+  if (!isConnected) {
+    return BILLING_STATES.NO_KEY
+  }
+
+  const balanceObj = accountData.balance || {}
+  const nomads =
+    balanceObj.nomads !== undefined
+      ? Number(balanceObj.nomads)
+      : accountData.nomads !== undefined
+        ? Number(accountData.nomads)
+        : 0
+
+  if (accountData.billing_blocked || accountData.status_code === 402 || nomads <= 0) {
+    return BILLING_STATES.INSUFFICIENT_FUNDS
+  }
+
+  return BILLING_STATES.ACTIVE_OK
+}
+
+export function BillingTab({ ctx, initialData = null }) {
+  const [accountData, setAccountData] = useState(initialData)
+  const [loading, setLoading] = useState(!initialData)
   const [error, setError] = useState('')
+  const [lastStatusCode, setLastStatusCode] = useState(null)
   const [keyInput, setKeyInput] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [connectMessage, setConnectMessage] = useState('')
@@ -109,10 +202,13 @@ export function BillingTab({ ctx }) {
   const loadAccount = useCallback(async () => {
     setLoading(true)
     setError('')
+    setLastStatusCode(null)
     try {
       const res = await callNomadApi(ctx, '/account')
       setAccountData(res || {})
     } catch (err) {
+      const status = err && err.status ? Number(err.status) : 0
+      setLastStatusCode(status)
       setError(
         sanitizeWhiteLabelText(
           (err && err.message) || 'Не удалось получить сведения о тарифе и балансе.'
@@ -124,30 +220,14 @@ export function BillingTab({ ctx }) {
   }, [ctx])
 
   useEffect(() => {
-    let active = true
-    ;(async () => {
-      try {
-        const res = await callNomadApi(ctx, '/account')
-        if (active) {
-          setAccountData(res || {})
-          setError('')
-        }
-      } catch (err) {
-        if (active) {
-          setError(
-            sanitizeWhiteLabelText(
-              (err && err.message) || 'Сервер NomadNet временно недоступен.'
-            )
-          )
-        }
-      } finally {
-        if (active) setLoading(false)
-      }
-    })()
-    return () => {
-      active = false
+    if (!initialData) {
+      loadAccount()
     }
-  }, [ctx])
+  }, [loadAccount, initialData])
+
+  const billingState = useMemo(() => {
+    return determineBillingState(accountData, error, lastStatusCode)
+  }, [accountData, error, lastStatusCode])
 
   const handleConnectKey = async (event) => {
     if (event && typeof event.preventDefault === 'function') {
@@ -174,6 +254,8 @@ export function BillingTab({ ctx }) {
       })
       setKeyInput('')
       setConnectMessage('Ключ NomadNet успешно подключён. Сведения о балансе обновлены.')
+      setError('')
+      setLastStatusCode(null)
       if (res && (res.balance || res.plan || res.connected !== undefined)) {
         setAccountData((prev) => ({ ...(prev || {}), ...res, connected: true }))
       } else {
@@ -230,8 +312,112 @@ export function BillingTab({ ctx }) {
     (accountData && (accountData.cabinet_url || accountData.billing_url || accountData.topup_url)) ||
     DEFAULT_CABINET_URL
 
+  const bannerInfo = BILLING_MESSAGES[billingState]
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div
+      data-testid="nomad-billing-container"
+      data-billing-state={billingState}
+      style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}
+    >
+      {/* 4 явных состояния тарифа на «вы» */}
+      {billingState !== BILLING_STATES.ACTIVE_OK && bannerInfo && (
+        <div
+          data-testid={`billing-state-banner-${billingState}`}
+          style={{
+            padding: '16px 20px',
+            borderRadius: '12px',
+            border:
+              billingState === BILLING_STATES.INSUFFICIENT_FUNDS
+                ? '1px solid rgba(239, 68, 68, 0.4)'
+                : billingState === BILLING_STATES.NETWORK_ERROR
+                  ? '1px solid rgba(245, 158, 11, 0.4)'
+                  : billingState === BILLING_STATES.CP_ERROR
+                    ? '1px solid rgba(220, 38, 38, 0.4)'
+                    : '1px solid var(--border, rgba(128,128,128,0.25))',
+            background:
+              billingState === BILLING_STATES.INSUFFICIENT_FUNDS
+                ? 'rgba(239, 68, 68, 0.08)'
+                : billingState === BILLING_STATES.NETWORK_ERROR
+                  ? 'rgba(245, 158, 11, 0.08)'
+                  : billingState === BILLING_STATES.CP_ERROR
+                    ? 'rgba(220, 38, 38, 0.08)'
+                    : 'var(--card, rgba(128,128,128,0.06))',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3
+              data-testid="billing-banner-title"
+              style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}
+            >
+              {bannerInfo.title}
+            </h3>
+            <span
+              style={{
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                background: 'rgba(128,128,128,0.14)',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+              }}
+            >
+              {billingState}
+            </span>
+          </div>
+          <p
+            data-testid="billing-banner-desc"
+            style={{ margin: 0, fontSize: '13px', lineHeight: 1.5, opacity: 0.9 }}
+          >
+            {bannerInfo.description}
+          </p>
+          <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+            {billingState === BILLING_STATES.INSUFFICIENT_FUNDS && (
+              <button
+                type="button"
+                data-testid="billing-topup-button"
+                onClick={() => openExternalSafe(ctx, cabinetUrl)}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'var(--primary, #2563eb)',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {bannerInfo.actionLabel}
+              </button>
+            )}
+            {(billingState === BILLING_STATES.NETWORK_ERROR ||
+              billingState === BILLING_STATES.CP_ERROR) && (
+              <button
+                type="button"
+                data-testid="billing-retry-button"
+                onClick={loadAccount}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border, rgba(128,128,128,0.3))',
+                  background: 'transparent',
+                  color: 'inherit',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {bannerInfo.actionLabel}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Верхняя панель состояния тарифа и баланса */}
       <div
         style={{
@@ -242,6 +428,7 @@ export function BillingTab({ ctx }) {
       >
         {/* Карточка баланса номадов */}
         <div
+          data-testid="billing-balance-card"
           style={{
             padding: '20px',
             borderRadius: '12px',
@@ -253,98 +440,70 @@ export function BillingTab({ ctx }) {
             gap: '14px',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
-            <div>
-              <div style={{ fontSize: '12px', opacity: 0.72, fontWeight: 500 }}>
-                Баланс управляемой сети NomadNet
-              </div>
-              <div style={{ fontSize: '28px', fontWeight: 700, marginTop: '4px', letterSpacing: '-0.02em' }}>
-                {loading ? '...' : `${formatNomadsNumber(nomadsAvailable)} номадов`}
-              </div>
+          <div>
+            <div style={{ fontSize: '12px', opacity: 0.72, fontWeight: 500 }}>
+              Баланс единого счёта
             </div>
-            <span
+            <div
+              data-testid="billing-balance-amount"
               style={{
-                fontSize: '12px',
-                fontWeight: 600,
-                padding: '4px 10px',
-                borderRadius: '999px',
-                background: isConnected ? 'rgba(34, 197, 94, 0.16)' : 'rgba(148, 163, 184, 0.18)',
-                color: isConnected ? '#22c55e' : 'inherit',
+                fontSize: '28px',
+                fontWeight: 700,
+                marginTop: '4px',
+                color: nomadsAvailable > 0 ? 'inherit' : '#ef4444',
               }}
             >
-              {isConnected ? 'Номады подключены' : 'Ключ не подключён'}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '10px',
-              padding: '10px 12px',
-              borderRadius: '8px',
-              background: 'rgba(128,128,128,0.06)',
-              fontSize: '13px',
-            }}
-          >
-            <div>
-              <div style={{ opacity: 0.68, fontSize: '11px' }}>Всего на счёте</div>
-              <div style={{ fontWeight: 600, marginTop: '2px' }}>
-                {formatNomadsNumber(nomadsTotal)} номадов
-              </div>
+              {formatNomadsNumber(nomadsAvailable)}{' '}
+              <span style={{ fontSize: '16px', fontWeight: 500, opacity: 0.75 }}>номадов</span>
             </div>
-            <div>
-              <div style={{ opacity: 0.68, fontSize: '11px' }}>Зарезервировано</div>
-              <div style={{ fontWeight: 600, marginTop: '2px' }}>
-                {formatNomadsNumber(nomadsReserved)} номадов
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '12px', opacity: 0.65 }}>
+            <div style={{ fontSize: '12px', opacity: 0.65, marginTop: '4px' }}>
+              {nomadsReserved > 0 ? `Зарезервировано: ${formatNomadsNumber(nomadsReserved)} · ` : ''}
               Обновлено: {updatedAt ? formatDateTimeRu(updatedAt) : 'только что'}
-            </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={loadAccount}
-                disabled={loading}
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border, rgba(128,128,128,0.28))',
-                  background: 'transparent',
-                  color: 'inherit',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  cursor: loading ? 'default' : 'pointer',
-                }}
-              >
-                {loading ? 'Обновление...' : 'Обновить'}
-              </button>
-              <button
-                type="button"
-                onClick={() => openExternalSafe(ctx, cabinetUrl)}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: 'var(--primary, #2563eb)',
-                  color: '#ffffff',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Пополнить в личном кабинете
-              </button>
             </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              data-testid="billing-cabinet-topup-btn"
+              onClick={() => openExternalSafe(ctx, cabinetUrl)}
+              style={{
+                padding: '7px 14px',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'var(--primary, #2563eb)',
+                color: '#ffffff',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Пополнить баланс NomadNet
+            </button>
+            <button
+              type="button"
+              data-testid="billing-refresh-balance-btn"
+              onClick={loadAccount}
+              disabled={loading}
+              style={{
+                padding: '7px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border, rgba(128,128,128,0.28))',
+                background: 'transparent',
+                color: 'inherit',
+                fontSize: '12px',
+                cursor: loading ? 'default' : 'pointer',
+                opacity: loading ? 0.6 : 1,
+              }}
+            >
+              {loading ? 'Обновление...' : 'Обновить'}
+            </button>
           </div>
         </div>
 
         {/* Карточка активного тарифа */}
         <div
+          data-testid="billing-plan-card"
           style={{
             padding: '20px',
             borderRadius: '12px',
@@ -361,11 +520,15 @@ export function BillingTab({ ctx }) {
               <div style={{ fontSize: '12px', opacity: 0.72, fontWeight: 500 }}>
                 Текущий тарифный план
               </div>
-              <div style={{ fontSize: '22px', fontWeight: 700, marginTop: '4px' }}>
+              <div
+                data-testid="billing-plan-name"
+                style={{ fontSize: '20px', fontWeight: 700, marginTop: '4px' }}
+              >
                 {planName}
               </div>
             </div>
             <span
+              data-testid="billing-plan-status"
               style={{
                 fontSize: '12px',
                 fontWeight: 600,
@@ -410,45 +573,10 @@ export function BillingTab({ ctx }) {
         </div>
       </div>
 
-      {/* Уведомление об ошибке чтения баланса, если есть */}
-      {error ? (
-        <div
-          style={{
-            padding: '12px 16px',
-            borderRadius: '10px',
-            border: '1px solid rgba(245, 158, 11, 0.35)',
-            background: 'rgba(245, 158, 11, 0.1)',
-            fontSize: '13px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '12px',
-          }}
-        >
-          <span>
-            Сведения о балансе сейчас недоступны ({error}). Вы можете подключить или обновить ключ ниже.
-          </span>
-          <button
-            type="button"
-            onClick={loadAccount}
-            style={{
-              padding: '5px 10px',
-              borderRadius: '6px',
-              border: '1px solid rgba(245, 158, 11, 0.45)',
-              background: 'transparent',
-              color: 'inherit',
-              fontSize: '12px',
-              cursor: 'pointer',
-            }}
-          >
-            Повторить
-          </button>
-        </div>
-      ) : null}
-
       {/* Форма подключения ключа nmd_... */}
       <form
         onSubmit={handleConnectKey}
+        data-testid="billing-connect-form"
         style={{
           padding: '20px',
           borderRadius: '12px',
@@ -470,6 +598,7 @@ export function BillingTab({ ctx }) {
           </div>
           {maskedKey ? (
             <span
+              data-testid="billing-current-masked-key"
               style={{
                 fontSize: '12px',
                 padding: '4px 10px',
@@ -490,6 +619,7 @@ export function BillingTab({ ctx }) {
             onChange={(e) => setKeyInput(e.target.value)}
             placeholder="nmd_live_..."
             aria-label="Ключ NomadNet"
+            data-testid="billing-key-input"
             style={{
               flex: '1 1 280px',
               padding: '9px 12px',
@@ -504,6 +634,7 @@ export function BillingTab({ ctx }) {
           <button
             type="submit"
             disabled={connecting}
+            data-testid="billing-submit-key-btn"
             style={{
               padding: '9px 18px',
               borderRadius: '8px',
@@ -521,10 +652,14 @@ export function BillingTab({ ctx }) {
         </div>
 
         {connectError ? (
-          <div style={{ fontSize: '13px', color: '#ef4444' }}>{connectError}</div>
+          <div data-testid="billing-connect-error" style={{ fontSize: '13px', color: '#ef4444' }}>
+            {connectError}
+          </div>
         ) : null}
         {connectMessage ? (
-          <div style={{ fontSize: '13px', color: '#22c55e' }}>{connectMessage}</div>
+          <div data-testid="billing-connect-success" style={{ fontSize: '13px', color: '#22c55e' }}>
+            {connectMessage}
+          </div>
         ) : null}
       </form>
     </div>
@@ -532,6 +667,18 @@ export function BillingTab({ ctx }) {
 }
 
 export default function registerBillingTab(ctx) {
+  // Регистрируем только маршрут и команду палитры — СТРОГО БЕЗ SIDEBAR_NAV_AREA
+  ctx.register({
+    id: 'billing-route',
+    area: ROUTES_AREA,
+    data: {
+      id: 'nomad.billing.route',
+      path: '/nomad-billing',
+      title: 'Тариф и баланс NomadNet',
+    },
+    render: () => <BillingTab ctx={ctx} />,
+  })
+
   ctx.register({
     id: 'palette',
     area: PALETTE_AREA,

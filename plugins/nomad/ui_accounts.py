@@ -44,11 +44,12 @@ import uuid
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from . import core_adapter, ru_only, spawn, ui_cli
+from . import core_adapter, ru_only, spawn, ui_cli, ui_switch_feed
 
 logger = logging.getLogger("hermes_plugins.nomad.ui_accounts")
 
 router = APIRouter(tags=["nomad-accounts"])
+router.include_router(ui_switch_feed.router)
 
 # --- Константы пула (паритет с agent/credential_pool.py) -----------------------------------------
 
@@ -1017,6 +1018,16 @@ def build_accounts_snapshot(
 
     violations = ru_only.audit_auth_store(auth_store) if ru_mode.enabled else []
 
+    try:
+        from . import db
+        conn = db.connect()
+        try:
+            feed_items = db.list_account_switches(conn, provider=normalized_filter, limit=20)
+        finally:
+            conn.close()
+    except Exception:
+        feed_items = []
+
     return {
         "status": "ok",
         "active_provider": active_provider,
@@ -1028,6 +1039,7 @@ def build_accounts_snapshot(
         "accounts": all_accounts,
         "providers": providers_summary,
         "pools": list(providers_summary.values()),
+        "switch_feed": feed_items,
         "ru_only": {
             "enabled": ru_mode.enabled,
             "source": ru_mode.source,

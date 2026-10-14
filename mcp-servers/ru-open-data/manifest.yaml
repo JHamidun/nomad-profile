@@ -1,0 +1,42 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: ru-open-data
+description: Russian open state data with no credentials at all — company accounting statements by INN from the tax service, plus Bank of Russia key rate and FX rates. Works the moment it is installed.
+source: https://bo.nalog.gov.ru/
+
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+
+auth:
+  type: none
+
+post_install: |
+  Nothing to configure. No key, no account, no registration — this is the one
+  entry that works the second it is installed, which makes it the right thing
+  to show first in a demo.
+
+  What it answers: "who is this counterparty and what do their books look
+  like". Every Russian company files accounting statements and the tax service
+  publishes them openly. Start with `fns_find_company` and an INN, then
+  `fns_reports` for the published years, then `fns_financials` for the
+  statement itself — decoded into named lines (Выручка, ЧИСТАЯ ПРИБЫЛЬ,
+  БАЛАНС), not raw form codes.
+
+  Also here: `cbr_key_rate` and `cbr_rates` from the Bank of Russia.
+
+  Two things worth knowing before promising anything on top of it:
+
+  * bo.nalog.gov.ru is the UNDOCUMENTED internal API of a web interface. Every
+    call was made live before this shipped, but nobody guarantees it, and it
+    can change without notice. Build a demo on it, not a billing system.
+  * Credit organisations — banks, insurers — do not publish here. An empty
+    result for a bank is the system working correctly, not a failure.
+
+  Figures are as published, in thousands of roubles. Unmapped line codes are
+  shown as "строка NNNN" rather than guessed at: a wrong label on a financial
+  figure is worse than no label.

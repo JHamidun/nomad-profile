@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "role": "marketer",
+  "role_title": "Маркетолог",
+  "track": "_core",
+  "current_mission": "m01-talk-to-agent",
+  "completed": ["m00-first-run"],
+  "scores": {
+    "m00-first-run": {
+      "score": 100,
+      "passed": true,
+      "checked_at": "2026-07-04T12:00:00Z",
+      "feedback": "Все проверки пройдены: about-me.md на месте, поля заполнены."
+    }
+  },
+  "started_at": "2026-07-04T10:00:00Z",
+  "updated_at": "2026-07-04T12:00:00Z"
+}

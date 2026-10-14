@@ -130,6 +130,26 @@ MIGRATIONS: list[tuple[int, tuple[str, ...]]] = [
         """,
         "CREATE INDEX task_pins_by_lane ON task_pins(lane, board)",
     )),
+    # M-133: лента переключений аккаунтов при ошибках 429/исчерпании пула.
+    # Дедупликация повторных вызовов того же запроса — по уникальному api_request_id.
+    (5, (
+        """
+        CREATE TABLE account_switch_events (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            api_request_id TEXT NOT NULL UNIQUE,
+            provider       TEXT NOT NULL DEFAULT '',
+            model          TEXT NOT NULL DEFAULT '',
+            status_code    INTEGER NOT NULL DEFAULT 429,
+            from_slot      TEXT NOT NULL,
+            to_slot        TEXT NOT NULL,
+            line           TEXT NOT NULL,
+            ts             TEXT NOT NULL,
+            created_at     TEXT NOT NULL
+        )
+        """,
+        "CREATE INDEX account_switch_events_by_provider ON account_switch_events(provider, id)",
+        "CREATE INDEX account_switch_events_by_ts ON account_switch_events(ts, id)",
+    )),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -364,6 +384,26 @@ def get_swarm(conn: sqlite3.Connection, swarm_id: str, *, with_events: bool = Tr
     if with_events:
         record["events"] = list_events(conn, swarm_id=swarm_id)
     return record
+
+
+def list_swarms(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 50,
+    with_events: bool = False,
+) -> list[dict[str, Any]]:
+    """List swarms ordered by created_at DESC."""
+    rows = conn.execute(
+        "SELECT id, goal, status, created_at, pool_mode_at_creation FROM swarms ORDER BY created_at DESC LIMIT ?",
+        (max(1, int(limit)),),
+    ).fetchall()
+    swarms = []
+    for row in rows:
+        record = dict(row)
+        if with_events:
+            record["events"] = list_events(conn, swarm_id=record["id"])
+        swarms.append(record)
+    return swarms
 
 
 # --- token meter & unified usage table (M-107 / M-173) ----------------------------------------------
@@ -839,3 +879,830 @@ def list_task_pins(
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# --- worker processes table (M-165 / N8) -------------------------------------------------------------
+
+WORKER_PROCESSES_TABLE = "worker_processes"
+EVENT_WORKER_LAUNCHED = "worker_launched"
+EVENT_WORKER_STATUS_CHANGED = "worker_status_changed"
+
+_WORKER_PROCESSES_DDL: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS worker_processes (
+        pid          INTEGER NOT NULL,
+        start_time   REAL    NOT NULL,
+        slot_dir     TEXT    NOT NULL,
+        task_id      TEXT    NOT NULL DEFAULT '',
+        run_id       TEXT    NOT NULL DEFAULT '',
+        lane         TEXT    NOT NULL DEFAULT '',
+        executable   TEXT    NOT NULL DEFAULT '',
+        parent_pid   INTEGER,
+        gateway_pid  INTEGER,
+        method       TEXT    NOT NULL DEFAULT 'wmi',
+        status       TEXT    NOT NULL DEFAULT 'running',
+        created_at   TEXT    NOT NULL,
+        updated_at   TEXT    NOT NULL,
+        PRIMARY KEY (pid, start_time)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS worker_processes_by_slot ON worker_processes(slot_dir)",
+    "CREATE INDEX IF NOT EXISTS worker_processes_by_task ON worker_processes(task_id)",
+    "CREATE INDEX IF NOT EXISTS worker_processes_by_status ON worker_processes(status)",
+)
+
+
+def ensure_worker_processes_table(conn: sqlite3.Connection) -> None:
+    """Create ``worker_processes`` and its indexes if not yet present."""
+    for stmt in _WORKER_PROCESSES_DDL:
+        conn.execute(stmt)
+
+
+def record_worker_process(
+    conn: sqlite3.Connection,
+    *,
+    pid: int,
+    start_time: float,
+    slot_dir: Any,
+    task_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    lane: Optional[str] = None,
+    executable: Any = "",
+    parent_pid: Optional[int] = None,
+    gateway_pid: Optional[int] = None,
+    method: str = "wmi",
+    status: str = "running",
+    swarm_id: Optional[str] = None,
+    created_at: Optional[str] = None,
+) -> dict:
+    """Persist ``(pid, start_time, slot_dir)`` for a detached executor process in ``data.db``."""
+    if isinstance(pid, bool) or int(pid) <= 0:
+        raise ValueError(f"pid must be a positive integer, got {pid!r}")
+    if isinstance(start_time, bool) or float(start_time) <= 0:
+        raise ValueError(f"start_time must be a positive timestamp, got {start_time!r}")
+    slot_text = str(slot_dir).strip() if slot_dir is not None else ""
+    if not slot_text:
+        raise ValueError("slot_dir must be non-empty")
+
+    pid_val = int(pid)
+    start_val = float(start_time)
+    task_val = str(task_id or "").strip()
+    run_val = str(run_id or "").strip()
+    lane_val = str(lane or "").strip()
+    exe_val = str(executable or "").strip()
+    ppid_val = int(parent_pid) if parent_pid is not None and not isinstance(parent_pid, bool) else None
+    gpid_val = int(gateway_pid) if gateway_pid is not None and not isinstance(gateway_pid, bool) else None
+    method_val = str(method or "wmi").strip() or "wmi"
+    status_val = str(status or "running").strip() or "running"
+    stamp = str(created_at).strip() if created_at and str(created_at).strip() else _now()
+
+    ensure_worker_processes_table(conn)
+    with transaction(conn):
+        conn.execute(
+            "INSERT INTO worker_processes ("
+            "pid, start_time, slot_dir, task_id, run_id, lane, executable, "
+            "parent_pid, gateway_pid, method, status, created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(pid, start_time) DO UPDATE SET "
+            "slot_dir = excluded.slot_dir, "
+            "task_id = CASE WHEN excluded.task_id != '' THEN excluded.task_id ELSE worker_processes.task_id END, "
+            "run_id = CASE WHEN excluded.run_id != '' THEN excluded.run_id ELSE worker_processes.run_id END, "
+            "lane = CASE WHEN excluded.lane != '' THEN excluded.lane ELSE worker_processes.lane END, "
+            "executable = CASE WHEN excluded.executable != '' THEN excluded.executable ELSE worker_processes.executable END, "
+            "parent_pid = COALESCE(excluded.parent_pid, worker_processes.parent_pid), "
+            "gateway_pid = COALESCE(excluded.gateway_pid, worker_processes.gateway_pid), "
+            "method = excluded.method, "
+            "status = excluded.status, "
+            "updated_at = excluded.updated_at",
+            (
+                pid_val,
+                start_val,
+                slot_text,
+                task_val,
+                run_val,
+                lane_val,
+                exe_val,
+                ppid_val,
+                gpid_val,
+                method_val,
+                status_val,
+                stamp,
+                stamp,
+            ),
+        )
+        _insert_event(
+            conn,
+            EVENT_WORKER_LAUNCHED,
+            {
+                "pid": pid_val,
+                "start_time": start_val,
+                "slot_dir": slot_text,
+                "task_id": task_val,
+                "run_id": run_val,
+                "lane": lane_val,
+                "executable": exe_val,
+                "parent_pid": ppid_val,
+                "gateway_pid": gpid_val,
+                "method": method_val,
+                "status": status_val,
+            },
+            swarm_id,
+        )
+    row = get_worker_process(conn, pid_val, start_time=start_val)
+    assert row is not None
+    return row
+
+
+def get_worker_process(
+    conn: sqlite3.Connection,
+    pid: int,
+    *,
+    start_time: Optional[float] = None,
+) -> Optional[dict]:
+    """Return a row from ``worker_processes`` by ``pid`` (and ``start_time`` if given)."""
+    ensure_worker_processes_table(conn)
+    if start_time is not None:
+        row = conn.execute(
+            "SELECT * FROM worker_processes WHERE pid = ? AND ABS(start_time - ?) < 1e-6 "
+            "ORDER BY created_at DESC LIMIT 1",
+            (int(pid), float(start_time)),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM worker_processes WHERE pid = ? ORDER BY start_time DESC LIMIT 1",
+            (int(pid),),
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def list_worker_processes(
+    conn: sqlite3.Connection,
+    *,
+    status: Optional[str] = None,
+    slot_dir: Any = None,
+    task_id: Optional[str] = None,
+    lane: Optional[str] = None,
+) -> list[dict]:
+    """List rows from ``worker_processes`` ordered by ``(created_at, pid)``."""
+    ensure_worker_processes_table(conn)
+    clauses: list[str] = []
+    params: list[Any] = []
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(str(status).strip())
+    if slot_dir is not None:
+        clauses.append("slot_dir = ?")
+        params.append(str(slot_dir).strip())
+    if task_id is not None:
+        clauses.append("task_id = ?")
+        params.append(str(task_id).strip())
+    if lane is not None:
+        clauses.append("lane = ?")
+        params.append(str(lane).strip())
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM worker_processes{where} ORDER BY created_at, pid",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_worker_process_status(
+    conn: sqlite3.Connection,
+    pid: int,
+    status: str,
+    *,
+    start_time: Optional[float] = None,
+) -> int:
+    """Update ``status`` and ``updated_at`` for ``pid`` (and ``start_time`` if given)."""
+    ensure_worker_processes_table(conn)
+    status_val = str(status).strip()
+    if not status_val:
+        raise ValueError("status must be non-empty")
+    stamp = _now()
+    with transaction(conn):
+        if start_time is not None:
+            cur = conn.execute(
+                "UPDATE worker_processes SET status = ?, updated_at = ? "
+                "WHERE pid = ? AND ABS(start_time - ?) < 1e-6",
+                (status_val, stamp, int(pid), float(start_time)),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE worker_processes SET status = ?, updated_at = ? WHERE pid = ?",
+                (status_val, stamp, int(pid)),
+            )
+        return int(cur.rowcount)
+
+
+def delete_worker_process(
+    conn: sqlite3.Connection,
+    pid: int,
+    *,
+    start_time: Optional[float] = None,
+) -> int:
+    """Remove row(s) for ``pid`` (and ``start_time`` if given) from ``worker_processes``."""
+    ensure_worker_processes_table(conn)
+    with transaction(conn):
+        if start_time is not None:
+            cur = conn.execute(
+                "DELETE FROM worker_processes WHERE pid = ? AND ABS(start_time - ?) < 1e-6",
+                (int(pid), float(start_time)),
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM worker_processes WHERE pid = ?",
+                (int(pid),),
+            )
+        return int(cur.rowcount)
+
+
+# --- three counters & budget reservations (M-173 / N14) ----------------------------------------------
+
+BUDGET_RESERVATIONS_TABLE = "budget_reservations"
+WEEKLY_QUOTA_TABLE = "weekly_quota_snapshots"
+EVENT_BUDGET_BLOCKED = "budget_blocked"
+
+SUBSCRIPTION_PROVIDERS: frozenset[str] = frozenset({"claude-code", "codex"})
+PAID_PROVIDERS: frozenset[str] = frozenset(
+    {"deepseek", "gemini", "perplexity", "kimi", "yandex", "openrouter"}
+)
+
+_MONEY_TABLES_DDL: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS budget_reservations (
+        reservation_id TEXT PRIMARY KEY,
+        provider       TEXT NOT NULL,
+        model          TEXT NOT NULL DEFAULT '',
+        task_id        TEXT NOT NULL DEFAULT '',
+        run_id         TEXT NOT NULL DEFAULT '',
+        is_auxiliary   INTEGER NOT NULL DEFAULT 0,
+        reserved_usd   REAL NOT NULL CHECK (reserved_usd >= 0.0),
+        actual_usd     REAL,
+        status         TEXT NOT NULL DEFAULT 'held'
+            CHECK (status IN ('held', 'settled', 'released')),
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS budget_res_by_provider_status ON budget_reservations(provider, status)",
+    """
+    CREATE TABLE IF NOT EXISTS weekly_quota_snapshots (
+        provider   TEXT NOT NULL,
+        account    TEXT NOT NULL DEFAULT 'default',
+        weekly_pct REAL NOT NULL CHECK (weekly_pct >= 0.0 AND weekly_pct <= 100.0),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, account)
+    )
+    """,
+)
+
+
+def ensure_money_tables(conn: sqlite3.Connection) -> None:
+    """Create ``budget_reservations`` and ``weekly_quota_snapshots`` if not yet present."""
+    for stmt in _MONEY_TABLES_DDL:
+        conn.execute(stmt)
+
+
+def query_tokens_sub(
+    conn: sqlite3.Connection,
+    *,
+    provider: Optional[str] = None,
+    account: Optional[str] = None,
+    goal_id: Optional[str] = None,
+    swarm_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    since: Optional[str] = None,
+) -> int:
+    """Counter 1 (``tokens_sub``): subscription tokens only. Never combined with ``usd`` or ``weekly_pct``."""
+    clauses: list[str] = [
+        "(billing = 'subscription' OR (COALESCE(billing, '') = '' AND provider IN ('claude-code', 'codex')))"
+    ]
+    params: list[Any] = []
+    if provider is not None:
+        clauses.append("provider = ?")
+        params.append(str(provider).strip().lower())
+    if account is not None:
+        clauses.append("account = ?")
+        params.append(str(account).strip())
+    if goal_id is not None:
+        clauses.append("goal_id = ?")
+        params.append(str(goal_id).strip())
+    if swarm_id is not None:
+        clauses.append("swarm_id = ?")
+        params.append(str(swarm_id).strip())
+    if task_id is not None:
+        clauses.append("task_id = ?")
+        params.append(str(task_id).strip())
+    if since is not None:
+        clauses.append("created_at >= ?")
+        params.append(str(since).strip())
+    where = " WHERE " + " AND ".join(clauses)
+    row = conn.execute(
+        f"SELECT COALESCE(SUM(total_tokens), 0) AS tokens_sub FROM usage_events{where}",
+        params,
+    ).fetchone()
+    return int(row["tokens_sub"]) if row is not None else 0
+
+
+def query_usd_spent(
+    conn: sqlite3.Connection,
+    *,
+    provider: Optional[str] = None,
+    account: Optional[str] = None,
+    goal_id: Optional[str] = None,
+    swarm_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    since: Optional[str] = None,
+    include_reserved: bool = False,
+) -> float:
+    """Counter 2 (``usd``): paid API spend in USD only. Never combined with ``tokens_sub`` or ``weekly_pct``."""
+    clauses: list[str] = ["cost_usd > 0 OR billing = 'metered' OR provider NOT IN ('claude-code', 'codex', 'tool', '')"]
+    params: list[Any] = []
+    if provider is not None:
+        clauses.append("LOWER(provider) = ?")
+        params.append(str(provider).strip().lower())
+    if account is not None:
+        clauses.append("account = ?")
+        params.append(str(account).strip())
+    if goal_id is not None:
+        clauses.append("goal_id = ?")
+        params.append(str(goal_id).strip())
+    if swarm_id is not None:
+        clauses.append("swarm_id = ?")
+        params.append(str(swarm_id).strip())
+    if task_id is not None:
+        clauses.append("task_id = ?")
+        params.append(str(task_id).strip())
+    if since is not None:
+        clauses.append("created_at >= ?")
+        params.append(str(since).strip())
+    where = " WHERE " + " AND ".join(f"({c})" for c in clauses)
+    row = conn.execute(
+        f"SELECT COALESCE(SUM(cost_usd), 0.0) AS spent_usd FROM usage_events{where}",
+        params,
+    ).fetchone()
+    spent = float(row["spent_usd"]) if row is not None else 0.0
+    if include_reserved:
+        ensure_money_tables(conn)
+        res_clauses = ["status = 'held'"]
+        res_params: list[Any] = []
+        if provider is not None:
+            res_clauses.append("LOWER(provider) = ?")
+            res_params.append(str(provider).strip().lower())
+        if task_id is not None:
+            res_clauses.append("task_id = ?")
+            res_params.append(str(task_id).strip())
+        res_where = " WHERE " + " AND ".join(res_clauses)
+        res_row = conn.execute(
+            f"SELECT COALESCE(SUM(reserved_usd), 0.0) AS held_usd FROM budget_reservations{res_where}",
+            res_params,
+        ).fetchone()
+        held = float(res_row["held_usd"]) if res_row is not None else 0.0
+        spent += held
+    return round(spent, 8)
+
+
+def record_weekly_pct(
+    conn: sqlite3.Connection,
+    provider: str,
+    weekly_pct: float,
+    *,
+    account: str = "default",
+    updated_at: Optional[str] = None,
+) -> dict:
+    """Record Counter 3 (``weekly_pct``): weekly subscription percentage [0..100]."""
+    prov = str(provider or "").strip().lower()
+    if not prov:
+        raise ValueError("provider must be non-empty")
+    acct = str(account or "default").strip() or "default"
+    pct = float(weekly_pct)
+    if pct < 0.0 or pct > 100.0:
+        raise ValueError(f"weekly_pct must be between 0 and 100, got {weekly_pct!r}")
+    stamp = str(updated_at).strip() if updated_at and str(updated_at).strip() else _now()
+    ensure_money_tables(conn)
+    with transaction(conn):
+        conn.execute(
+            "INSERT INTO weekly_quota_snapshots (provider, account, weekly_pct, updated_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(provider, account) DO UPDATE SET "
+            "weekly_pct = excluded.weekly_pct, updated_at = excluded.updated_at",
+            (prov, acct, pct, stamp),
+        )
+    row = conn.execute(
+        "SELECT provider, account, weekly_pct, updated_at FROM weekly_quota_snapshots "
+        "WHERE provider = ? AND account = ?",
+        (prov, acct),
+    ).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def query_weekly_pct(
+    conn: sqlite3.Connection,
+    *,
+    provider: Optional[str] = None,
+    account: Optional[str] = None,
+) -> float:
+    """Counter 3 (``weekly_pct``): weekly percentage only. Never combined with ``tokens_sub`` or ``usd``."""
+    ensure_money_tables(conn)
+    clauses: list[str] = []
+    params: list[Any] = []
+    if provider is not None:
+        clauses.append("provider = ?")
+        params.append(str(provider).strip().lower())
+    if account is not None:
+        clauses.append("account = ?")
+        params.append(str(account).strip())
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    row = conn.execute(
+        f"SELECT COALESCE(MAX(weekly_pct), 0.0) AS weekly_pct FROM weekly_quota_snapshots{where}",
+        params,
+    ).fetchone()
+    return float(row["weekly_pct"]) if row is not None else 0.0
+
+
+def create_budget_reservation(
+    conn: sqlite3.Connection,
+    *,
+    provider: str,
+    reserved_usd: float,
+    model: str = "",
+    task_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    is_auxiliary: bool = False,
+    reservation_id: Optional[str] = None,
+    created_at: Optional[str] = None,
+) -> dict:
+    """Hold ``reserved_usd`` in ``budget_reservations`` before an API call is dispatched."""
+    prov = str(provider or "").strip().lower()
+    if not prov:
+        raise ValueError("provider must be non-empty")
+    res_usd = _non_negative_float(reserved_usd)
+    res_id = str(reservation_id).strip() if reservation_id else f"res-{uuid.uuid4().hex[:16]}"
+    stamp = str(created_at).strip() if created_at and str(created_at).strip() else _now()
+    ensure_money_tables(conn)
+    with transaction(conn):
+        conn.execute(
+            "INSERT INTO budget_reservations ("
+            "reservation_id, provider, model, task_id, run_id, is_auxiliary, "
+            "reserved_usd, actual_usd, status, created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'held', ?, ?)",
+            (
+                res_id,
+                prov,
+                str(model or "").strip(),
+                str(task_id or "").strip(),
+                str(run_id or "").strip(),
+                1 if is_auxiliary else 0,
+                res_usd,
+                stamp,
+                stamp,
+            ),
+        )
+    row = conn.execute(
+        "SELECT * FROM budget_reservations WHERE reservation_id = ?",
+        (res_id,),
+    ).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def settle_budget_reservation(
+    conn: sqlite3.Connection,
+    reservation_id: str,
+    *,
+    actual_usd: float,
+) -> Optional[dict]:
+    """Mark a held reservation as ``settled`` and record ``actual_usd``."""
+    ensure_money_tables(conn)
+    stamp = _now()
+    with transaction(conn):
+        conn.execute(
+            "UPDATE budget_reservations SET status = 'settled', actual_usd = ?, updated_at = ? "
+            "WHERE reservation_id = ?",
+            (_non_negative_float(actual_usd), stamp, str(reservation_id).strip()),
+        )
+    row = conn.execute(
+        "SELECT * FROM budget_reservations WHERE reservation_id = ?",
+        (str(reservation_id).strip(),),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def release_budget_reservation(
+    conn: sqlite3.Connection,
+    reservation_id: str,
+) -> Optional[dict]:
+    """Release a held reservation without spend (e.g. cancelled or failed before billing)."""
+    ensure_money_tables(conn)
+    stamp = _now()
+    with transaction(conn):
+        conn.execute(
+            "UPDATE budget_reservations SET status = 'released', updated_at = ? "
+            "WHERE reservation_id = ?",
+            (stamp, str(reservation_id).strip()),
+        )
+    row = conn.execute(
+        "SELECT * FROM budget_reservations WHERE reservation_id = ?",
+        (str(reservation_id).strip(),),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def list_budget_reservations(
+    conn: sqlite3.Connection,
+    *,
+    provider: Optional[str] = None,
+    status: Optional[str] = None,
+) -> list[dict]:
+    """List rows from ``budget_reservations`` ordered by ``created_at``."""
+    ensure_money_tables(conn)
+    clauses: list[str] = []
+    params: list[Any] = []
+    if provider is not None:
+        clauses.append("LOWER(provider) = ?")
+        params.append(str(provider).strip().lower())
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(str(status).strip())
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM budget_reservations{where} ORDER BY created_at, reservation_id",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def release_orphaned_budget_reservations(
+    conn: sqlite3.Connection,
+    active_task_ids: Iterable[str] = (),
+) -> list[dict]:
+    """Release ``held`` budget reservations that do not belong to any active running task."""
+    ensure_money_tables(conn)
+    active_set = {str(tid).strip() for tid in active_task_ids if str(tid or "").strip()}
+    held_rows = list_budget_reservations(conn, status="held")
+    released: list[dict] = []
+    for row in held_rows:
+        tid = str(row.get("task_id") or "").strip()
+        if tid and tid in active_set:
+            continue
+        updated = release_budget_reservation(conn, row["reservation_id"])
+        if updated is not None:
+            released.append(updated)
+    return released
+
+
+# ---------------------------------------------------------------------------
+# Task acceptance reviews & single-revision state (M-172 / N10)
+# ---------------------------------------------------------------------------
+
+_TASK_REVIEWS_DDL = (
+    "CREATE TABLE IF NOT EXISTS task_reviews ("
+    "    task_id              TEXT NOT NULL,"
+    "    board                TEXT NOT NULL DEFAULT 'default',"
+    "    swarm_id             TEXT REFERENCES swarms(id),"
+    "    work_class           TEXT NOT NULL DEFAULT '',"
+    "    executor_lane        TEXT NOT NULL DEFAULT '',"
+    "    executor_vendor      TEXT NOT NULL DEFAULT '',"
+    "    judge_lane           TEXT NOT NULL DEFAULT '',"
+    "    judge_vendor         TEXT NOT NULL DEFAULT '',"
+    "    judge_model          TEXT NOT NULL DEFAULT '',"
+    "    verdict              TEXT NOT NULL DEFAULT 'pending'"
+    "        CHECK (verdict IN ('pending', 'green', 'red', 'revision_requested', 'needs_owner')),"
+    "    subreason            TEXT NOT NULL DEFAULT '',"
+    "    revision_count       INTEGER NOT NULL DEFAULT 0 CHECK (revision_count >= 0),"
+    "    max_revisions        INTEGER NOT NULL DEFAULT 1 CHECK (max_revisions >= 0),"
+    "    judge_calls          INTEGER NOT NULL DEFAULT 0 CHECK (judge_calls >= 0),"
+    "    deterministic_passed INTEGER NOT NULL DEFAULT 0 CHECK (deterministic_passed IN (0, 1)),"
+    "    remarks              TEXT NOT NULL DEFAULT '',"
+    "    created_at           TEXT NOT NULL,"
+    "    updated_at           TEXT NOT NULL,"
+    "    PRIMARY KEY (task_id, board)"
+    ");",
+    "CREATE INDEX IF NOT EXISTS idx_task_reviews_swarm ON task_reviews(swarm_id);",
+    "CREATE INDEX IF NOT EXISTS idx_task_reviews_verdict ON task_reviews(verdict);",
+)
+
+
+def ensure_review_tables(conn: sqlite3.Connection) -> None:
+    """Ensure ``task_reviews`` table exists without altering ``MIGRATIONS`` version."""
+    with transaction(conn):
+        for stmt in _TASK_REVIEWS_DDL:
+            conn.execute(stmt)
+
+
+def get_task_review(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    board: Optional[str] = "default",
+) -> Optional[dict]:
+    """Return the ``task_reviews`` row for ``(task_id, board)`` or ``None``."""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return None
+    ensure_review_tables(conn)
+    row = conn.execute(
+        "SELECT * FROM task_reviews WHERE task_id = ? AND board = ?",
+        (tid, _normalize_board(board)),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def upsert_task_review(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    board: Optional[str] = "default",
+    swarm_id: Optional[str] = None,
+    work_class: str = "",
+    executor_lane: str = "",
+    executor_vendor: str = "",
+    judge_lane: str = "",
+    judge_vendor: str = "",
+    judge_model: str = "",
+    verdict: str = "pending",
+    subreason: str = "",
+    revision_count: int = 0,
+    max_revisions: int = 1,
+    judge_calls: int = 0,
+    deterministic_passed: bool = False,
+    remarks: str = "",
+) -> dict:
+    """Insert or update a ``task_reviews`` record for ``(task_id, board)``."""
+    tid = str(task_id or "").strip()
+    if not tid:
+        raise ValueError("task_id must be non-empty")
+    b = _normalize_board(board)
+    stamp = _now()
+    ensure_review_tables(conn)
+    with transaction(conn):
+        conn.execute(
+            "INSERT INTO task_reviews ("
+            "task_id, board, swarm_id, work_class, executor_lane, executor_vendor, "
+            "judge_lane, judge_vendor, judge_model, verdict, subreason, "
+            "revision_count, max_revisions, judge_calls, deterministic_passed, "
+            "remarks, created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(task_id, board) DO UPDATE SET "
+            "swarm_id = COALESCE(excluded.swarm_id, task_reviews.swarm_id), "
+            "work_class = CASE WHEN excluded.work_class != '' THEN excluded.work_class ELSE task_reviews.work_class END, "
+            "executor_lane = CASE WHEN excluded.executor_lane != '' THEN excluded.executor_lane ELSE task_reviews.executor_lane END, "
+            "executor_vendor = CASE WHEN excluded.executor_vendor != '' THEN excluded.executor_vendor ELSE task_reviews.executor_vendor END, "
+            "judge_lane = CASE WHEN excluded.judge_lane != '' THEN excluded.judge_lane ELSE task_reviews.judge_lane END, "
+            "judge_vendor = CASE WHEN excluded.judge_vendor != '' THEN excluded.judge_vendor ELSE task_reviews.judge_vendor END, "
+            "judge_model = CASE WHEN excluded.judge_model != '' THEN excluded.judge_model ELSE task_reviews.judge_model END, "
+            "verdict = excluded.verdict, "
+            "subreason = excluded.subreason, "
+            "revision_count = excluded.revision_count, "
+            "max_revisions = excluded.max_revisions, "
+            "judge_calls = excluded.judge_calls, "
+            "deterministic_passed = excluded.deterministic_passed, "
+            "remarks = excluded.remarks, "
+            "updated_at = excluded.updated_at",
+            (
+                tid,
+                b,
+                swarm_id,
+                str(work_class or "").strip(),
+                str(executor_lane or "").strip(),
+                str(executor_vendor or "").strip().lower(),
+                str(judge_lane or "").strip(),
+                str(judge_vendor or "").strip().lower(),
+                str(judge_model or "").strip(),
+                str(verdict or "pending").strip(),
+                str(subreason or "").strip(),
+                max(0, int(revision_count)),
+                max(0, int(max_revisions)),
+                max(0, int(judge_calls)),
+                1 if deterministic_passed else 0,
+                str(remarks or ""),
+                stamp,
+                stamp,
+            ),
+        )
+    row = get_task_review(conn, tid, board=b)
+    assert row is not None
+    return row
+
+
+def set_swarm_status(
+    conn: sqlite3.Connection,
+    swarm_id: str,
+    status: str,
+) -> Optional[dict]:
+    """Update ``status`` of a swarm in ``swarms``."""
+    sid = str(swarm_id or "").strip()
+    st = str(status or "").strip()
+    if not sid or not st:
+        raise ValueError("swarm_id and status must be non-empty")
+    with transaction(conn):
+        conn.execute(
+            "UPDATE swarms SET status = ? WHERE id = ?",
+            (st, sid),
+        )
+    return get_swarm(conn, sid)
+
+
+def record_account_switch(
+    conn: sqlite3.Connection,
+    *,
+    api_request_id: str,
+    provider: str,
+    model: str = "",
+    status_code: int = 429,
+    from_slot: str = "#1",
+    to_slot: str = "#2",
+    line: str = "",
+    ts: Optional[str] = None,
+    created_at: Optional[str] = None,
+) -> bool:
+    """Record an account switch event into ``account_switch_events``.
+
+    Returns True if a new row was inserted, False if skipped due to duplicate api_request_id.
+    """
+    rid = str(api_request_id or "").strip()
+    if not rid:
+        raise ValueError("api_request_id must be non-empty")
+
+    prov = str(provider or "").strip()
+    mod = str(model or "").strip()
+    code = int(status_code)
+    f_slot = str(from_slot or "#1").strip()
+    t_slot = str(to_slot or "#2").strip()
+    now_iso = _now()
+    event_ts = str(ts or now_iso).strip()
+    created = str(created_at or now_iso).strip()
+
+    if not line:
+        try:
+            dt = datetime.fromisoformat(event_ts.replace("Z", "+00:00"))
+            time_str = dt.strftime("%H:%M")
+        except Exception:
+            time_str = datetime.now(timezone.utc).strftime("%H:%M")
+        line = f"{time_str} · {prov} · {code} · активна {t_slot}"
+
+    with transaction(conn):
+        cur = conn.execute(
+            """
+            INSERT OR IGNORE INTO account_switch_events (
+                api_request_id, provider, model, status_code, from_slot, to_slot, line, ts, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (rid, prov, mod, code, f_slot, t_slot, line, event_ts, created),
+        )
+        return cur.rowcount > 0
+
+
+def list_account_switches(
+    conn: sqlite3.Connection,
+    *,
+    provider: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List recent account switch events ordered by id DESC."""
+    query = "SELECT id, api_request_id, provider, model, status_code, from_slot, to_slot, line, ts, created_at FROM account_switch_events"
+    params: list[Any] = []
+    if provider:
+        query += " WHERE provider = ?"
+        params.append(str(provider).strip())
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+
+    cur = conn.execute(query, params)
+    rows = cur.fetchall()
+    return [
+        {
+            "id": r[0],
+            "api_request_id": r[1],
+            "provider": r[2],
+            "model": r[3],
+            "status_code": r[4],
+            "from_slot": r[5],
+            "to_slot": r[6],
+            "line": r[7],
+            "ts": r[8],
+            "created_at": r[9],
+        }
+        for r in rows
+    ]
+
+
+def get_last_account_switch(
+    conn: sqlite3.Connection,
+    *,
+    provider: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    switches = list_account_switches(conn, provider=provider, limit=1)
+    return switches[0] if switches else None
+
+
+upsert_task_pin = set_task_pin
+upsert_worker_process = record_worker_process
+
+
+
+
+
+

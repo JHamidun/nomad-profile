@@ -1,14 +1,18 @@
-"""``hermes nomad …`` — the plugin's CLI tree (registered via ``ctx.register_cli_command``).
+"""``hermes nomad …`` and ``hermes swarm …`` — the plugin's CLI trees (``ctx.register_cli_command``).
 
-Каноническая форма из спецификации — ``hermes nomad swarm …``. Отдельный бинарник ``nmd`` плагин
-зарегистрировать не может: ядро даёт плагину только подкоманду верхнего уровня.
+Поддерживаются обе точки входа (M-193):
+
+* ``hermes nomad swarm …`` — полное дерево под ``nomad`` (рядом с ``ru``, ``balance``, ``connect``);
+* ``hermes swarm …`` (и ``nomad swarm …`` через обёртку профиля ``hermes -p nomad``) — команда
+  верхнего уровня ``swarm`` с теми же подкомандами роя.
 
 Подкоманды ``swarm``:
 
 * ``show <id> [--json]`` — один рой с журналом событий;
 * ``lanes [--json]`` — каталог возможностей (M-160): каждая дорожка с живостью, способом оплаты,
   остатком окна (число или ``unknown``) и разрешением белого списка. Пробы бесплатные, см.
-  ``capabilities.py``.
+  ``capabilities.py``;
+* ``pin <task_id> <lane> […]`` — ручное закрепление карточки канбана за дорожкой/слотом (M-164).
 
 Коды выхода (ядро превращает int, возвращённый обработчиком, в код выхода процесса):
 0 — найдено и напечатано, 1 — роя с таким id нет, 2 — неполная команда.
@@ -26,9 +30,8 @@ EXIT_OK, EXIT_NOT_FOUND, EXIT_USAGE = 0, 1, 2
 _ORIG_BUILD_CATALOG = capabilities.build_catalog
 
 
-def setup(parser) -> None:
-    subs = parser.add_subparsers(dest="nomad_command")
-    swarm = subs.add_parser("swarm", help="Inspect swarms of the Nomad orchestrator")
+def setup_swarm(swarm) -> None:
+    """Attach ``show``, ``lanes``, and ``pin`` subcommands to a ``swarm`` parser."""
     swarm_subs = swarm.add_subparsers(dest="nomad_swarm_command")
     show = swarm_subs.add_parser("show", help="Show one swarm by id")
     show.add_argument("swarm_id", help="Swarm id as returned by swarm_start (sw-…)")
@@ -59,6 +62,18 @@ def setup(parser) -> None:
     pin.add_argument("--json", action="store_true", dest="nomad_json",
                      help="Print the pin result as JSON")
 
+    stop_cmd = swarm_subs.add_parser("stop", help="Stop a running swarm by id (M-176)")
+    stop_cmd.add_argument("swarm_id", help="Swarm id as returned by swarm_start (sw-…)")
+    stop_cmd.add_argument("--json", action="store_true", dest="nomad_json",
+                          help="Print the stop result as JSON")
+    swarm.set_defaults(nomad_command="swarm", nomad_swarm_parser=swarm)
+
+
+def setup(parser) -> None:
+    subs = parser.add_subparsers(dest="nomad_command")
+    swarm = subs.add_parser("swarm", help="Inspect swarms of the Nomad orchestrator")
+    setup_swarm(swarm)
+
     ru = subs.add_parser("ru", help="Inspect and enforce the RU-only contour")
     ru_subs = ru.add_subparsers(dest="nomad_ru_command")
     audit = ru_subs.add_parser("audit", help="Audit the active profile for RU-only contour compliance")
@@ -71,6 +86,16 @@ def setup(parser) -> None:
     balance = subs.add_parser("balance", help="Show NomadNet Control Plane balance")
     balance.add_argument("--json", action="store_true", dest="nomad_json",
                          help="Print the account balance state as JSON")
+
+    conduct = subs.add_parser("conduct", help="Run foreground conductor fallback (M-178)")
+    conduct.add_argument("--lane", default="default", dest="nomad_lane",
+                         help="Target executor lane (default: default)")
+    conduct.add_argument("--board", default="default", dest="nomad_board",
+                         help="Kanban board slug (default: default)")
+    conduct.add_argument("--max-cards", type=int, default=3, dest="nomad_max_cards",
+                         help="Maximum cards to conduct to done (default: 3)")
+    conduct.add_argument("--json", action="store_true", dest="nomad_json",
+                         help="Print result as JSON")
 
     parser.set_defaults(nomad_parser=parser, nomad_swarm_parser=swarm, nomad_ru_parser=ru)
 
@@ -218,22 +243,94 @@ def _handle_balance(args) -> int:
     return EXIT_OK
 
 
-_SWARM_HANDLERS = {"show": _handle_show, "lanes": _handle_lanes, "pin": _handle_pin}
+def _handle_stop(args) -> int:
+    from . import db, stop
+
+    try:
+        conn = db.connect()
+    except Exception as exc:
+        if getattr(args, "nomad_json", False):
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        else:
+            print(f"nomad: database error: {exc}", file=sys.stderr)
+        return EXIT_NOT_FOUND
+    try:
+        res = stop.stop_swarm(conn, args.swarm_id)
+    finally:
+        conn.close()
+    if not res.get("ok"):
+        if getattr(args, "nomad_json", False):
+            print(json.dumps(res, ensure_ascii=False))
+        else:
+            print(f"nomad: swarm stop error: {res.get('error')}", file=sys.stderr)
+        return EXIT_NOT_FOUND
+    if getattr(args, "nomad_json", False):
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+    else:
+        print(f"stopped swarm {args.swarm_id}")
+    return EXIT_OK
+
+
+def _handle_conduct(args) -> int:
+    from . import conduct, db
+
+    try:
+        conn = db.connect()
+    except Exception as exc:
+        if getattr(args, "nomad_json", False):
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        else:
+            print(f"nomad: database error: {exc}", file=sys.stderr)
+        return EXIT_NOT_FOUND
+    try:
+        res = conduct.conduct_swarm(
+            conn,
+            lane=getattr(args, "nomad_lane", "default") or "default",
+            board=getattr(args, "nomad_board", "default") or "default",
+            max_cards=getattr(args, "nomad_max_cards", 3) or 3,
+        )
+    finally:
+        conn.close()
+    if res.get("status") == "skipped_locked":
+        if getattr(args, "nomad_json", False):
+            print(json.dumps(res, ensure_ascii=False))
+        else:
+            print("skipped_locked")
+        return EXIT_OK
+    if getattr(args, "nomad_json", False):
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+    else:
+        print(f"conduct {res.get('status')}: completed {len(res.get('completed_tasks', []))} cards")
+    return EXIT_OK
+
+
+_SWARM_HANDLERS = {
+    "show": _handle_show,
+    "lanes": _handle_lanes,
+    "pin": _handle_pin,
+    "stop": _handle_stop,
+}
 _RU_HANDLERS = {"audit": _handle_ru_audit, "apply": _handle_ru_apply}
+
+
+def handle_swarm(args) -> int:
+    handler = _SWARM_HANDLERS.get(getattr(args, "nomad_swarm_command", None))
+    if handler is None:
+        parser = getattr(args, "nomad_swarm_parser", None)
+        if parser is not None:
+            parser.print_help()
+        return EXIT_USAGE
+    return handler(args)
 
 
 def handle(args) -> int:
     command = getattr(args, "nomad_command", None)
     if command == "balance":
         return _handle_balance(args)
+    if command == "conduct":
+        return _handle_conduct(args)
     if command == "swarm":
-        handler = _SWARM_HANDLERS.get(getattr(args, "nomad_swarm_command", None))
-        if handler is None:
-            parser = getattr(args, "nomad_swarm_parser", None)
-            if parser is not None:
-                parser.print_help()
-            return EXIT_USAGE
-        return handler(args)
+        return handle_swarm(args)
     if command == "ru":
         handler = _RU_HANDLERS.get(getattr(args, "nomad_ru_command", None))
         if handler is None:
@@ -246,3 +343,4 @@ def handle(args) -> int:
     if parser is not None:
         parser.print_help()
     return EXIT_USAGE
+

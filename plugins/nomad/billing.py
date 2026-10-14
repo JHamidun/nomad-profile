@@ -213,16 +213,32 @@ def on_transform_api_error_classification(
     num_messages: int = 0,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
-    """Хук ``transform_api_error_classification`` для ошибок шлюза NomadNet CP."""
-    del error_type, approx_tokens, context_length, num_messages, kwargs
+    raw_status = status_code
+    if raw_status is None and error is not None:
+        raw_code = getattr(error, "status_code", None)
+        if isinstance(raw_code, int):
+            raw_status = raw_code
+
+    # M-133: хук ошибки отслеживает 429 и ротацию аккаунтов в пул-ленту
+    if raw_status == 429:
+        try:
+            from . import ui_switch_feed
+            body_dict = _extract_body(error_body, error)
+            rid = kwargs.get("api_request_id") or kwargs.get("request_id") or body_dict.get("id") or body_dict.get("request_id")
+            if rid:
+                ui_switch_feed.detect_and_record_switch(
+                    api_request_id=str(rid),
+                    provider=provider,
+                    model=model,
+                    status_code=429,
+                )
+        except Exception:
+            pass
 
     if not _is_nomadnet_provider(provider, model):
         return None
 
-    if status_code is None and error is not None:
-        raw_status = getattr(error, "status_code", None)
-        if isinstance(raw_status, int):
-            status_code = raw_status
+    status_code = raw_status
 
     body = _extract_body(error_body, error)
     code = _extract_code(error_code, body)

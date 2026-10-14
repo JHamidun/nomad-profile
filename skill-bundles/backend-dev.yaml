@@ -1,0 +1,13 @@
+name: backend-dev
+description: >-
+  Разработка и код-ревью: TDD (сначала тест), проверка качества изменений и оформление
+  пулл-реквеста в одном слэш-вызове /backend-dev.
+skills:
+  - github-code-review
+  - test-driven-development
+  - github-pr-workflow
+instruction: |
+  Ты работаешь в режиме разработки бэкенда (/backend-dev). Применяй все три навыка совместно:
+  начинай с воспроизводимого автотеста (test-driven-development), проверяй дифф и граничные
+  случаи по чек-листу код-ревью (github-code-review) и оформляй изменения по стандарту
+  пулл-реквестов (github-pr-workflow).

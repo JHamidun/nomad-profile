@@ -16,10 +16,11 @@ license: proprietary
 # (_env_template_from_manifest, :199). required по умолчанию true — ставим false там,
 # где без переменной продукт всё равно работает.
 env_requires:
-  - name: NOMADNET_LICENSE_KEY
-    description: Ключ лицензии Nomad — выдаётся после оплаты
+  - name: NOMADNET_API_KEY
+    description: Ключ NomadNet (nmd_...) — выдаётся после оплаты и подключается через hermes nomad connect
+    required: false
   - name: NOMADNET_CP_URL
-    description: Адрес Control Plane. Пусто = боевой адрес по умолчанию
+    description: Переопределение адреса Control Plane (если пусто, берётся адрес из config.yaml профиля)
     required: false
   - name: OPENROUTER_API_KEY
     description: Ключ OpenRouter, если работаешь через него
@@ -31,9 +32,10 @@ env_requires:
 # плагины и темы при установке профиля просто не приедут.
 distribution_owned:
   - distribution.yaml
+  - .no-bundled-skills
   - SOUL.md
   - config.yaml
-  - mcp.json
+  - mcp-servers
   - skills
   - skill-bundles
   - plugins
@@ -47,3 +49,5 @@ distribution_owned:
   # Список путей, снятых с поставки: самопроверка плагина удаляет их из профиля на старте
   # (plugins/nomad/selfcheck.py). Без этой строки список в профиль не приедет.
   - nomad-retired.yaml
+  # Контрольная сумма исходников десктопа для быстрого выпуска пакета build-pack.yml (M-204, D08).
+  - desktop-src.sha256

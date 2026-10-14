@@ -11,20 +11,22 @@
 |---|---|---|
 | `distribution.yaml` | манифест поставки профиля и список `distribution_owned` | собран (M-019, M-069, M-071) |
 | `SOUL.md` | характер и правила агента | ждёт M-073 |
-| `config.yaml` | шаблон настроек профиля | собран в черновике (M-067), расширение — M-068, M-085, M-189 |
-| `mcp.json` | 9 своих MCP-серверов | ждёт M-080 |
-| `skills/` | навыки Nomad и маркер `.no-bundled-skills` | ждёт M-075 (далее M-076, M-078, M-079, M-087) |
-| `skill-bundles/` | наборы навыков под задачи | ждёт M-089 |
+| `config.yaml` | шаблон настроек профиля и секция `mcp_servers:` | собран (M-067, M-068, M-080, M-085, M-189) |
+| `mcp-servers/` | 9 собственных MCP-серверов Nomad (`bitrix24`, `knowledge-base`, `outlook-local`, `ru-counterparty`, `ru-open-data`, `telegram-bot`, `yandex-disk`, `yandex-mail`, `yandex-metrika`); отдельный `mcp.json` упразднён, серверы объявлены в `config.yaml → mcp_servers` | собран (M-080) |
+| `skills/` | навыки Nomad (включая K2(а): `blender-mcp`, `submagic`, `vibecoding-course`) и маркер `.no-bundled-skills` | собран (M-075, M-076, M-078; далее M-079, M-087) |
+| `skill-bundles/` | наборы навыков под задачи | собран (M-089) |
 | `plugins/` | плагин ядра `nomad`: база роя, инструменты `swarm_start`/`swarm_show`, CLI `hermes nomad`, самопроверка `selfcheck.py`, `pool_mode`, аренда карточек, половины `dashboard/` и `desktop/` | собран (M-071, M-090, M-127, M-160 и др.) |
 | `desktop-plugins/` | вторая дверь десктоп-плагина (копируется Electron'ом из `plugins/nomad/desktop/plugin.js`) | привязан к M-127 |
 | `skins/` | `nomad.yaml` — баннер и палитра | собран (M-052) |
-| `dashboard-themes/` | тема дашборда `nomad.yaml` | ждёт M-074 |
+| `dashboard-themes/` | тема дашборда `nomad.yaml` | собран (M-074) |
 | `hooks/` | `nomad-loop`: хук `gateway:startup` поднимает цикл дирижёра внутри шлюза | собран (N1, доработка в M-072) |
 | `nomad-retired.yaml` | список путей, снятых с поставки (удаляются самопроверкой плагина на старте) | собран (M-071) |
 
 Шаблон `.env.EXAMPLE` в профиле генерируется установщиком и самопроверкой плагина автоматически из
 секции `env_requires` манифеста `distribution.yaml` (доработка переменных — M-068). Штатных
-расписаний `cron` в поставке нет — путь `cron` убран из `distribution_owned` в M-069.
+расписаний `cron` в поставке нет — путь `cron` убран из `distribution_owned` в M-069. Отдельный файл
+`mcp.json` упразднён в M-080: ядро читает конфигурацию MCP из секции `mcp_servers:` в `config.yaml`,
+а код серверов поставляется в `package/mcp-servers/<name>/server.py`.
 
 ## Две двери плагина десктопа, а не одна
 
@@ -39,16 +41,18 @@
 
 ## Что уже собрано и чего пока нет
 
-На диске в `package/` уже лежат и приезжают при установке 6 из 12 путей `distribution_owned`:
+На диске в `package/` уже лежат и приезжают при установке 10 из 12 путей `distribution_owned`:
 - `distribution.yaml` — манифест поставки;
-- `config.yaml` — базовый шаблон настроек (заголовки атрибуции, отключение каталога и телеметрии Nous, включение плагина `nomad`, `pool_mode: shipped`, `pre_update_backup: quick`, `skin: nomad`);
+- `.no-bundled-skills` — маркер отключения засева 124 навыков апстрима;
+- `config.yaml` — шаблон настроек (заголовки атрибуции, отключение каталога и телеметрии Nous, включение плагина `nomad`, `pool_mode: shipped`, `pre_update_backup: quick`, `skin: nomad`, `delegation.max_concurrent_children: 3`, `stt.language: ""`, `mcp_servers`);
+- `mcp-servers/` — 9 штатных MCP-серверов поставки Nomad (M-080);
+- `skills/` и `skill-bundles/` — навыки и наборы навыков Nomad (M-075, M-076, M-078, M-089);
 - `plugins/nomad/` — плагин ядра (контракт `contract.yaml`, самопроверка и синхронизация профиля `selfcheck.py`, база и аренда роя, `activation.py`, `ru_only.py`, `capabilities.py`, сборки `desktop/plugin.js` и `dashboard/dist/index.js`);
 - `hooks/nomad-loop/` — шлюзовый хук запуска дирижёра на `gateway:startup`;
-- `skins/nomad.yaml` — баннер и палитра CLI;
+- `skins/nomad.yaml` и `dashboard-themes/nomad.yaml` — баннер CLI и тема веб-дашборда;
 - `nomad-retired.yaml` — реестр снятых с поставки путей.
 
-Остальные 6 путей из `distribution_owned` (`SOUL.md`, `mcp.json`, `skills`, `skill-bundles`,
-`desktop-plugins`, `dashboard-themes`) привязаны к своим задачам в `PENDING_PATH_TASKS` внутри
+Остальные 2 пути из `distribution_owned` (`SOUL.md`, `desktop-plugins`) привязаны к своим задачам в `PENDING_PATH_TASKS` внутри
 `tools/check_profile_install.py`: чекер печатает `M-id` для каждого ожидающего пути и краснеет,
 если в `distribution_owned` появится отсутствующий на диске путь без задачи.
 

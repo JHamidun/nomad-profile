@@ -1,13 +1,17 @@
 {
   "name": "nomad",
-  "label": "Nomad",
+  "label": "Аккаунты",
   "description": "Nomad layer screens: the plugin backend under /api/plugins/nomad and its dashboard page",
   "icon": "Package",
   "version": "0.1.0",
   "tab": {
-    "path": "/nomad",
-    "hidden": true
+    "path": "/nomad-accounts",
+    "position": "after:env"
   },
+  "slots": [
+    "pre-main",
+    "cron:top"
+  ],
   "entry": "dist/index.js",
   "api": "plugin_api.py"
 }

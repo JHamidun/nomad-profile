@@ -13,6 +13,10 @@ handler.py`` и событие ``gateway:startup`` описаны в докум�
 плагина в том же процессе второй цикл не запустят.
 """
 
+# nomad-workaround: PR-6 (docs/upstream-prs.md)
+# До регистрации хука gateway_started в VALID_HOOKS плагинов ядра (PR-6)
+# дирижёр запускается через шлюзовый хук gateway:startup в hooks/nomad-loop/.
+
 from __future__ import annotations
 
 import hashlib

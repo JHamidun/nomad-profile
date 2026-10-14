@@ -25,6 +25,10 @@
 Модуль обращается к ядру Hermes исключительно через :mod:`.core_adapter`.
 """
 
+# nomad-workaround: PR-1 (docs/upstream-prs.md)
+# До появления хука pre_kanban_task_create в ядре Hermes (PR-1) заслонка входа
+# перехватывает вызовы на уровне pre_tool_call и валидирует модель/протекции до записи.
+
 from __future__ import annotations
 
 import logging

@@ -54,6 +54,8 @@ SECURITY_SECTIONS: tuple[str, ...] = (
     "nomad",
     "security",
     "privacy",
+    "agent",
+    "tools",
 )
 
 # Обязательные значения по умолчанию для блоков безопасности и приватности.
@@ -69,7 +71,7 @@ REQUIRED_DEFAULTS: dict[str, Any] = {
             "provider": "custom",
             "base_url": "https://openrouter.ai/api/v1",
             "model": "google/gemini-3.6-flash",
-            "key_env": "OPENROUTER_API_KEY",
+            "api_key": "${OPENROUTER_API_KEY}",
         },
     },
     "nous": {
@@ -83,6 +85,58 @@ REQUIRED_DEFAULTS: dict[str, Any] = {
     },
     "nomad": {
         "pool_mode": pool_mode.SHIPPED,
+    },
+    "agent": {
+        "environment_probe": False,
+    },
+    "tools": {
+        "tool_search": {
+            "defer": [
+                "annotate_preview",
+                "apply_layout",
+                "browser_back",
+                "browser_cdp",
+                "browser_click",
+                "browser_console",
+                "browser_dialog",
+                "browser_exec",
+                "browser_get_images",
+                "browser_navigate",
+                "browser_press",
+                "browser_scroll",
+                "browser_snapshot",
+                "browser_type",
+                "browser_vault_enter_code",
+                "browser_vault_fill",
+                "browser_vault_list",
+                "browser_vault_save_login",
+                "browser_vault_unlock",
+                "browser_vision",
+                "clarify",
+                "close_terminal",
+                "computer_use",
+                "cronjob_manage",
+                "delegate_task",
+                "desktop_preview",
+                "desktop_project",
+                "drive_preview",
+                "execute_code",
+                "focus_pane",
+                "gui_tour",
+                "image_generate",
+                "manage_catalog",
+                "memory",
+                "process_manage",
+                "read_terminal",
+                "read_window_below",
+                "search_files",
+                "session_search",
+                "show_tip",
+                "text_to_speech",
+                "todo_list",
+                "vision_analyze",
+            ],
+        },
     },
 }
 
@@ -282,6 +336,15 @@ def reconcile(
             _set_leaf(data, path, pool_mode.SHIPPED)
             reconciled.append(dotted)
             continue
+
+        if len(path) >= 2 and path[0] == "auxiliary":
+            # После `hermes nomad connect` вспомогательные задачи (compression, vision) переведены
+            # на основной маршрут CP (`provider: main`, M-097). Не откатываем их обратно в
+            # до-коннектные заглушки `deepseek` / `openrouter.ai`.
+            aux_data = data.get("auxiliary")
+            task_data = aux_data.get(path[1]) if isinstance(aux_data, dict) else None
+            if isinstance(task_data, dict) and str(task_data.get("provider") or "").strip().lower() == "main":
+                continue
 
         if present and _same_value(current, expected):
             continue

@@ -1,0 +1,321 @@
+---
+name: image-generation
+description: "Помогает формулировать запросы к генераторам картинок так."
+user_description: "Помогает формулировать запросы к генераторам картинок так, чтобы получалось задуманное: как описать героя, одежду, свет, стиль и кадр, что работает в DALL-E, Midjourney, Stable Diffusion и Gemini, плюс готовый рецепт сюрреалистичных рекламных креативов. Нужен, когда картинки выходят не те, что вы себе представляли."
+version: 1.0.0
+license: MIT
+metadata:
+  hermes:
+    category: video-and-media
+    tags: [image, generation, python, git, openai, gemini, claude, video]
+    source: claude-code-config-pack
+---
+## Когда применять
+
+Промпт-инжиниринг генерации картинок (Nano Banana, gpt-image-2.5, Midjourney, SD) + сюрреализм-пресет «эксперт / Магритт-Дали». Триггеры: «креатив для vk ads», «сюрреализм магритт».
+
+> ⚠️ **NO-KEY GUARD (обязательно):** этот функционал требует ОПЦИОНАЛЬНОГО стороннего API-ключа. Перед вызовом проверь ключ в `$HERMES_HOME/.env`. Если ключ отсутствует, пустой или placeholder (`your_*_api_key`) — **НЕ проси пользователя оплатить счёт, включить биллинг или купить API**. Скажи одной строкой: «Эта функция опциональна и требует свой API-ключ (например, бесплатный ключ на aistudio.google.com); из коробки всё остальное работает по подписке Claude» — и предложи альтернативу или продолжай без неё.
+
+# Image Generation Skill
+
+Expert image prompt engineering for AI image generators (Gemini/Nano Banana, OpenAI gpt-image-2.5, Midjourney, Stable Diffusion).
+
+> **See Also - Specialized API Skills** (вызывать по имени через skill_view tool, это отдельные навыки в `~/.hermes/skills/`, а не файлы этой папки):
+> - Skill `gemini-3-pro` - Google AI API: Gemini text (2M контекст), embeddings, TTS, grounding
+> - Skill `nano-banana-pro` - Photorealistic portrait templates for Gemini; Gemini-замена DALL-E 3 для сюрреалистичных рекламных пар (без VPN)
+> - Skill `openai-dalle` - OpenAI media API: gpt-image-2.5 (edit до 16 референсов, прозрачный фон), транскрипция, TTS, embeddings. Имя каталога историческое: DALL-E снят 12.05.2026, видео у OpenAI закрывается 24.09.2026
+>
+> **See Also - References:**
+> - **[references/vk-ads-surrealism-preset.md](references/vk-ads-surrealism-preset.md)** - пресет «эксперт / Магритт-Дали» для рекламных креативов (несочетаемые пары → сюрреализм)
+>
+> **Considered and rejected (2026-07-20):** inference.sh `belt` CLI (github.com/inference-sh/skills, 628★) — aggregator for 50+ image models incl. FLUX/Reve/Gemini. FLUX and Reve are already reachable via `replicate` skill (1000+ models incl. `black-forest-labs/flux-1.1-pro` and Reve 2.1); Gemini already default here. `belt` adds a second paywalled account (`belt login`, credit system, no published pricing) and a `curl | sh` installer for zero net-new model access — not adopted.
+
+## When to Use
+- User asks to create/generate an image
+- User needs help writing image prompts
+- User wants photorealistic or artistic AI images
+- User mentions Nano Banana, gpt-image, Midjourney, Stable Diffusion, Gemini image generation (а также DALL-E — но его больше нет, см. ниже)
+
+## Prompt Reference Database
+Load reference prompts from: `~/.hermes/ccpack/prompts/image_prompts_reference.json`
+(ships with the pack; video counterpart — `video_prompts_reference.json` alongside)
+
+## Core Prompt Structure
+
+### 1. Subject
+```
+[Main subject] + [Detailed description] + [Pose/Action]
+```
+Examples:
+- "a stylish young woman with confident expression, standing with hands in pockets"
+- "a sleek futuristic sports car shaped like a stylized scorpion"
+- "a tall humanoid robot with muscular athletic build"
+
+### 2. Clothing/Appearance (for portraits)
+```
+[Clothing items] + [Colors] + [Style] + [Accessories]
+```
+Examples:
+- "wearing oversized blazer in charcoal grey, minimal gold jewelry, edgy street style"
+- "dark sleeveless top, loose wide-legged denim pants, patterned white sneakers"
+
+### 3. Environment
+```
+[Location type] + [Details] + [Atmosphere]
+```
+Examples:
+- "seamless white studio background with soft diffused lighting"
+- "bright cozy living room with cream-colored sofa and green houseplants"
+- "urban cafe through glass window with blurred cityscape"
+
+### 4. Lighting
+```
+[Light type] + [Direction] + [Quality] + [Color]
+```
+Examples:
+- "soft natural light from large windows"
+- "dramatic side lighting with high-contrast shadows"
+- "studio lighting with clean highlights and minimal shadows"
+- "golden hour warm lighting with rim light"
+
+### 5. Camera/Technical
+```
+[Lens/focal length] + [Angle] + [DOF] + [Film type if applicable]
+```
+Examples:
+- "shot on 85mm lens, shallow depth of field"
+- "35mm film photography with rough grainy textures"
+- "fisheye lens with extreme distortion"
+
+### 6. Style/Quality
+```
+[Resolution] + [Style keywords] + [Mood]
+```
+Examples:
+- "8K ultra-detailed, photorealistic, professional quality"
+- "editorial fashion photography, high-end magazine look"
+- "cinematic composition, dramatic atmosphere"
+
+## Category Templates
+
+### Fashion/Portrait
+```
+[Quality] photo of [subject description], wearing [detailed clothing],
+[pose], [expression], [background/environment], [lighting style],
+[camera settings], [style keywords]
+```
+
+### Character Integration (Real + Fictional)
+```
+[Quality] image of [real person description] with [fictional character],
+[interaction/pose], [environment], [lighting], [style modifiers],
+preserving face exactly as reference
+```
+
+### Product Photography
+```
+[Product description] on [surface/background], [lighting setup],
+[camera angle], [reflections/shadows], [quality keywords]
+```
+
+### Cinematic Still
+```
+[Shot type] of [subject] in [dramatic setting], [lighting mood],
+[color grading], film still aesthetic, [genre keywords]
+```
+
+## Model-Specific Parameters
+
+### Midjourney
+```
+--ar [aspect ratio] --v [version] --style raw --q [quality 0.25-2]
+```
+- `--ar 16:9` for widescreen
+- `--ar 9:16` for vertical/mobile
+- `--ar 1:1` for square
+- `--v 6.0` for latest version
+- `--style raw` for less stylized
+
+### Stable Diffusion
+```json
+{
+  "steps": 30-60,
+  "cfg_scale": 7-12,
+  "sampler": "DPM++ 2M Karras",
+  "width": 1024,
+  "height": 1024
+}
+```
+
+### OpenAI — `gpt-image-2.5` (⛔ DALL-E мёртв с 12.05.2026)
+
+`dall-e-2` и `dall-e-3` сняты, вызов вернёт ошибку. Флагман OpenAI с 08.09.2026 —
+`gpt-image-2.5-sunburst`, быстрый близнец — `gpt-image-2.5-flare` (та же цена и
+те же параметры, разница только в задержке).
+
+Промпт под них пишется **не как под DALL-E 3**: тот отрабатывал короткое
+художественное описание и остальное додумывал сам, а 2.5 держится инструкции
+буквально — и потому вознаграждает точность и наказывает недосказанность.
+Лимит промпта поднялся до **32 000 знаков**, так что экономить незачем.
+
+Когда брать OpenAI вместо дефолтного Nano Banana 2:
+
+- нужен **точечный правочный цикл** («убери стул слева, остальное не трогай») —
+  Responses API с `previous_response_id` правит ту же картинку, а не рисует новую;
+- нужна **устойчивая личность на длинной серии** — `input_fidelity: "high"`;
+- нужно **много референсов разом** — до 16 входных картинок на `images.edit`;
+- нужен **прозрачный фон** — `background: "transparent"`, но только с png/webp:
+  на jpeg ошибки не будет, а фон вернётся белым.
+
+Полная вендорская справка — skill `openai-dalle` (имя каталога историческое).
+
+### Gemini — нижние две ступени лестницы
+
+> **Лестница целиком (решение владельца 09.09.2026):**
+> 🥉 NB2 Flash — дёшево и по умолчанию → 🥈 NB Pro — подороже → 🥇 `gpt-image-2.5-sunburst` — лучшее.
+> Раньше здесь стояло «Gemini — DEFAULT, always use this»: это верно только для
+> нижней ступени. Верхняя теперь у OpenAI, и уходить на неё нужно осознанно,
+> а не «когда нужен именно OpenAI».
+
+- **Default model:** `gemini-3.1-flash-image-preview` (Nano Banana 2 — fast, cheap, 4K)
+- **Pro model:** `gemini-3-pro-image-preview` (Nano Banana Pro — higher quality, slower)
+- **API:** `from google import genai` + `GOOGLE_API_KEY`
+- Supports detailed structured prompts
+- Excellent for text rendering and photorealism
+- Use `response_modalities=['IMAGE', 'TEXT']`
+- Remove `GEMINI_API_KEY` from env if set (SDK conflict)
+```python
+os.environ.pop('GEMINI_API_KEY', None)
+client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY'))
+response = client.models.generate_content(
+    model='gemini-3.1-flash-image-preview',  # or 'gemini-3-pro-image-preview' for max quality
+    contents=prompt,
+    config=types.GenerateContentConfig(response_modalities=['IMAGE', 'TEXT']),
+)
+```
+
+## Negative Prompts
+
+### General
+```
+blur, low quality, low resolution, grainy, pixelated, jpeg artifacts
+```
+
+### Anatomy (for people)
+```
+extra limbs, deformed hands, extra fingers, distorted face, ugly,
+disfigured, bad anatomy, wrong proportions
+```
+
+### Style Conflicts
+```
+cartoon, anime, illustration, painting, sketch, 3d render
+(when photorealistic is needed)
+```
+
+### Artifacts
+```
+watermark, text, logo, frame, border, signature, username
+```
+
+## Quality Boosters
+
+Add these for better results:
+- "8K" / "4K ultra HD"
+- "hyper-realistic" / "photorealistic"
+- "ultra-detailed"
+- "sharp focus"
+- "professional photography"
+- "high-end magazine quality"
+- "masterpiece"
+
+## Example Full Prompts
+
+### Fashion Portrait
+```
+Hyper-realistic fashion photo of a confident young woman with natural
+makeup, wearing an oversized charcoal grey blazer over white t-shirt,
+high-waisted black trousers, minimal gold jewelry. Standing with one
+hand in pocket, direct eye contact with camera. Seamless white studio
+background, soft diffused studio lighting with clean highlights.
+Shot on medium format camera, 85mm lens, shallow depth of field.
+Professional fashion photography, editorial style, 8K ultra-detailed.
+
+Negative: blur, grainy, extra fingers, deformed, cartoon, watermark
+```
+
+### Character Integration
+```
+Photorealistic 8K image of a smiling young Asian woman taking a selfie
+with Judy Hopps from Zootopia. Both characters standing side by side
+in a dark cinema hall, large movie screen visible behind them.
+The woman has long black hair, wearing white strapless top with stars.
+Judy in her police uniform, smiling. Cinematic lighting, ultra-detailed,
+preserve human face exactly as uploaded reference.
+
+Negative: cartoon style on human, deformed face, blurry, low quality
+```
+
+### Sci-Fi/Robot
+```
+Hyperrealistic 8k photo in bright cozy living room. Subject standing
+with humanoid robot partner behind them. Robot: tall athletic build,
+silver and gunmetal plates, visible cable muscles, glowing blue eyes,
+V-shaped torso. Robot's arm wrapped protectively around subject.
+Natural sunlight through white curtains, green houseplants, warm neutral
+walls. Realistic skin texture, detailed metal surfaces with micro-scratches,
+accurate global illumination. Photoreal, cinematic lighting.
+
+Negative: cartoon, anime, low res, horror, grotesque, human skin on robot
+```
+
+### Product Shot
+```
+Sleek black smartphone floating at 45-degree angle above polished
+dark marble surface. Dramatic side lighting creating elegant shadows
+and specular highlights on screen. Subtle reflection on marble.
+Pure black background, product photography style, 8K ultra-detailed,
+sharp focus, professional commercial quality.
+
+Negative: blur, reflections showing environment, dust, fingerprints, text
+```
+
+## Face Preservation (for character integration)
+
+When user wants their face in the image:
+```
+"Use the exact same face from the uploaded photo without altering
+any facial features or identity. Preserve the face, hairstyle,
+body type, clothing, and overall style exactly as in the reference."
+```
+
+## Workflow
+
+1. **Clarify vision**: What style, mood, purpose?
+2. **Identify elements**: Subject, environment, lighting, style
+3. **Choose model**: Gemini (дефолт), gpt-image-2.5, MJ или SD
+4. **Build prompt**: Layer details from general to specific
+5. **Add technical params**: Resolution, aspect ratio, model settings
+6. **Craft negatives**: Based on potential issues
+7. **Generate & iterate**: Refine based on results
+
+## Tips for Best Results
+
+1. **Be specific about details**: Colors, materials, textures
+2. **Describe lighting precisely**: Source, quality, direction
+3. **Include style references**: "editorial", "cinematic", "product photography"
+4. **Layer information**: Main subject first, then context
+5. **Use concrete terms**: "charcoal grey" > "dark color"
+6. **Specify camera settings**: Adds realism to prompts
+7. **Negative prompts matter**: Prevent common issues
+8. **Match prompt to model**: Each AI has strengths
+
+## Common Issues & Fixes
+
+| Issue | Solution |
+|-------|----------|
+| Blurry output | Add "sharp focus", "high resolution" |
+| Wrong hands | Add "anatomically correct hands" to prompt, "deformed hands" to negative |
+| Cartoon-ish | Add "photorealistic", "photograph", add "cartoon, illustration" to negative |
+| Wrong style | Be more specific about style, use negative prompts |
+| Text appearing | Add "no text, no watermark" to negative |

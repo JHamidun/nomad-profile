@@ -1,0 +1,65 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: outlook-local
+description: Read the Outlook mailbox already open on this desktop — unread mail, folders, search across subject/sender/body, full messages, upcoming meetings. No account setup, no OAuth app, no token; the credential is the Windows session. Read-only. Windows only.
+source: https://learn.microsoft.com/office/vba/api/overview/outlook
+
+# Runs on the install's OWN Python — the MCP SDK ships in the venv, so there is
+# no npx, no Node, and nothing to download at install time.
+#
+# ${PYTHON} is the interpreter Nomad itself runs on, substituted at install
+# time. NOT a bare `python`: the stdio child gets a filtered environment and
+# would resolve that through whatever PATH it inherits, which can be a system
+# interpreter with neither the MCP SDK nor pywin32 — the server then dies at
+# startup into a log line, and the entry looks installed but has no tools.
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+
+# Nothing to authenticate. The mailbox is already signed in inside Outlook, and
+# COM reaches it as the logged-in Windows user. That is the whole point of this
+# entry — see post_install.
+auth:
+  type: none
+
+post_install: |
+  When to enable: you use Outlook for work and want the agent to answer "what
+  came in", "find that letter from the accountant", "what is on my calendar"
+  without you switching windows.
+
+  WHY THIS ONE IS DIFFERENT FROM EVERY OTHER MAIL CONNECTOR
+
+  There is no account to connect and no token to issue. The mailbox is already
+  authenticated inside Outlook; this reads it through COM as the logged-in
+  Windows user. On a corporate machine that matters twice over: an OAuth app
+  usually needs an administrator's blessing, and a cloud service would need the
+  mail to leave the perimeter. Neither applies here — nothing leaves the
+  machine, and nobody has to approve anything.
+
+  It also cannot be copied by a hosted agent. Every rival platform on the
+  Russian market speaks MCP over HTTP only; a desktop application is out of
+  reach for all of them by construction.
+
+  READ-ONLY, ON PURPOSE
+
+  There is no send tool, and that is a decision rather than an oversight.
+  Sending is outward and irreversible, and it would go out under your own
+  corporate identity. A connector that can send silently is one nobody should
+  install on a work machine. Reading is where the value is, and read-only means
+  installing this can lose you nothing.
+
+  REQUIREMENTS
+
+  Windows with Outlook installed and a configured profile, and `pywin32` in the
+  Python Nomad runs on. If pywin32 is missing the tools say so and name the
+  install command instead of failing with an import traceback. On macOS or
+  Linux every tool answers with a plain explanation and points at yandex-mail
+  or a generic IMAP entry.
+
+  Start with `outlook_unread` — it is the question people actually have. Then
+  `outlook_search` (looks in subject, sender AND body), `outlook_read` for the
+  full text of one message, `outlook_calendar` for what is coming.

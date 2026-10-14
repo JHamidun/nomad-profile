@@ -1,0 +1,161 @@
+# Прайс-лист платных API-провайдеров роя Nomad (задачи M-173 / N14, M-185, M-192; спека §3.3, §5.2).
+# Тарифы указаны в USD за 1 000 000 токенов (input_per_m, output_per_m, cache_read_per_m,
+# cache_write_per_m) плюс фиксированная плата за запрос request_fee_usd (если есть у провайдера).
+# У каждого провайдера зафиксированы официальный источник (source_url) и дата сверки (source_date).
+#
+# Предполётный гард (money.py) считает верхнюю оценку (worst_case_usd) по этому файлу ДО отправки:
+#   - входные токены берутся с коэффициентом запаса prompt_safety_factor и БЕЗ скидки на кэш;
+#   - выходные токены берутся по полному потолку max_output_tokens (или default_max_output_tokens);
+#   - закладывается буфер auxiliary_reserve_ratio (не менее auxiliary_min_reserve_usd) на
+#     вспомогательные вызовы ядра без разреза по аккаунту (session_search, компрессор, память).
+schema_version: 1
+
+defaults:
+  prompt_safety_factor: 1.15
+  default_max_output_tokens: 4096
+  auxiliary_reserve_ratio: 0.15
+  auxiliary_min_reserve_usd: 0.0020
+
+providers:
+  deepseek:
+    source_url: "https://api-docs.deepseek.com/quick_start/pricing"
+    source_date: "2026-04-19"
+    default_model: deepseek-chat
+    models:
+      deepseek-chat:
+        input_per_m: 0.27
+        output_per_m: 1.10
+        cache_read_per_m: 0.07
+        cache_write_per_m: 0.27
+        request_fee_usd: 0.0
+        default_max_output_tokens: 4096
+      deepseek-reasoner:
+        input_per_m: 0.55
+        output_per_m: 2.19
+        cache_read_per_m: 0.14
+        cache_write_per_m: 0.55
+        request_fee_usd: 0.0
+        default_max_output_tokens: 8192
+
+  gemini:
+    source_url: "https://ai.google.dev/gemini-api/docs/pricing"
+    source_date: "2026-04-19"
+    default_model: gemini-2.5-pro
+    models:
+      gemini-2.5-pro:
+        input_per_m: 1.25
+        output_per_m: 10.00
+        cache_read_per_m: 0.3125
+        cache_write_per_m: 1.25
+        request_fee_usd: 0.0
+        default_max_output_tokens: 8192
+      gemini-2.5-flash:
+        input_per_m: 0.15
+        output_per_m: 0.60
+        cache_read_per_m: 0.0375
+        cache_write_per_m: 0.15
+        request_fee_usd: 0.0
+        default_max_output_tokens: 8192
+
+  perplexity:
+    source_url: "https://docs.perplexity.ai/guides/pricing"
+    source_date: "2026-04-19"
+    default_model: sonar-pro
+    models:
+      sonar-pro:
+        input_per_m: 3.00
+        output_per_m: 15.00
+        cache_read_per_m: 3.00
+        cache_write_per_m: 3.00
+        request_fee_usd: 0.005
+        default_max_output_tokens: 4096
+      sonar:
+        input_per_m: 1.00
+        output_per_m: 1.00
+        cache_read_per_m: 1.00
+        cache_write_per_m: 1.00
+        request_fee_usd: 0.005
+        default_max_output_tokens: 4096
+
+  kimi:
+    source_url: "https://platform.moonshot.ai/docs/pricing/chat"
+    source_date: "2026-04-19"
+    default_model: kimi-k2.5
+    models:
+      kimi-k2.5:
+        input_per_m: 0.60
+        output_per_m: 2.50
+        cache_read_per_m: 0.15
+        cache_write_per_m: 0.60
+        request_fee_usd: 0.0
+        default_max_output_tokens: 4096
+
+  yandex:
+    source_url: "https://yandex.cloud/ru/docs/foundation-models/pricing"
+    source_date: "2026-04-19"
+    default_model: gpt://folder/yandexgpt/latest
+    models:
+      gpt://folder/yandexgpt/latest:
+        input_per_m: 2.00
+        output_per_m: 4.00
+        cache_read_per_m: 2.00
+        cache_write_per_m: 2.00
+        request_fee_usd: 0.0
+        default_max_output_tokens: 4096
+      yandexgpt:
+        input_per_m: 2.00
+        output_per_m: 4.00
+        cache_read_per_m: 2.00
+        cache_write_per_m: 2.00
+        request_fee_usd: 0.0
+        default_max_output_tokens: 4096
+
+  glm:
+    source_url: "https://docs.z.ai/guides/overview/pricing"
+    source_date: "2026-04-19"
+    default_model: glm-5
+    models:
+      glm-5:
+        input_per_m: 1.00
+        output_per_m: 3.20
+        cache_read_per_m: 0.25
+        cache_write_per_m: 1.00
+        request_fee_usd: 0.0
+        default_max_output_tokens: 8192
+      glm-4.5:
+        input_per_m: 0.60
+        output_per_m: 2.20
+        cache_read_per_m: 0.11
+        cache_write_per_m: 0.60
+        request_fee_usd: 0.0
+        default_max_output_tokens: 8192
+      glm-4.5-air:
+        input_per_m: 0.20
+        output_per_m: 1.10
+        cache_read_per_m: 0.03
+        cache_write_per_m: 0.20
+        request_fee_usd: 0.0
+        default_max_output_tokens: 4096
+      glm-4.5-flash:
+        input_per_m: 0.00
+        output_per_m: 0.00
+        cache_read_per_m: 0.00
+        cache_write_per_m: 0.00
+        request_fee_usd: 0.0
+        default_max_output_tokens: 4096
+
+  openrouter:
+    source_url: "https://openrouter.ai/docs/faq#what-are-the-fees-for-using-openrouter"
+    source_date: "2026-04-19"
+    commission_pct: 5.5
+    min_commission_usd: 0.80
+    commission_note: "5.5% credit purchase fee (min $0.80)"
+    default_model: default
+    models:
+      default:
+        input_per_m: 3.00
+        output_per_m: 15.00
+        cache_read_per_m: 1.50
+        cache_write_per_m: 3.00
+        request_fee_usd: 0.0
+        default_max_output_tokens: 4096

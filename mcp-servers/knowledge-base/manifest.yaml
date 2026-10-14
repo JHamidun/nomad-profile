@@ -1,0 +1,49 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: knowledge-base
+description: Turn a folder into a searchable knowledge base — estimate what is there first, then index it locally, then ask questions. One SQLite file per base, incremental, no network and no API spend.
+source: https://www.sqlite.org/fts5.html
+
+# Standard library plus what already ships in the venv (python-docx, python-pptx,
+# lxml, charset-normalizer). Nothing is downloaded at install time.
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+  env:
+    NOMAD_HOME: "${NOMAD_HOME}"
+
+auth:
+  type: none
+
+post_install: |
+  ALWAYS run `kb_estimate` before `kb_build`. It answers the question that has
+  to come first — how much is in that folder, and what cannot be read — so
+  nobody agrees to a knowledge base over a folder that turns out to be mostly
+  scanned invoices.
+
+  Everything runs locally at disk speed. No network, no API spend, no data
+  leaves the machine — which is usually the whole reason the folder could not
+  be handed to a cloud assistant in the first place.
+
+  What it reads today: txt, md, csv, json, yaml, html, xml, source code, and
+  .docx / .pptx. What it CANNOT read on a default install: PDF, .xlsx, .doc,
+  .rtf, .msg. Those are counted and named in the estimate rather than dropped
+  in silence. Add `pypdf` and `openpyxl` to the install's venv if the folder
+  needs them, then re-run kb_build — it is incremental, so nothing is redone.
+
+  One base per source. Do not point two unrelated folders at the same name:
+  mixing corpora is measured to wreck answer quality far more than any
+  parameter you might tune afterwards.
+
+  Search is BM25 full text — it finds what was WORDED that way. Paraphrase
+  matching needs embeddings, which this entry does not download; `kb_status`
+  says plainly whether they are available on this machine.
+
+  Re-run `kb_build` any time to refresh: unchanged files are skipped by
+  timestamp, changed ones re-read, and files that were deleted have their
+  passages removed so the base stops answering from documents that no longer
+  exist.

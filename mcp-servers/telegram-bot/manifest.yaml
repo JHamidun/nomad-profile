@@ -1,0 +1,66 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: telegram-bot
+description: Send and read Telegram through your own bot. Sending is restricted to chats you list in advance. One token from @BotFather — no app registration, no legal entity.
+source: https://core.telegram.org/bots/api
+
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+  env:
+    TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+    TELEGRAM_ALLOWED_CHATS: "${TELEGRAM_ALLOWED_CHATS}"
+
+auth:
+  type: api_key
+  env:
+    - name: TELEGRAM_BOT_TOKEN
+      prompt: |
+        Telegram bot token. About a minute, and it needs nothing but Telegram:
+          1. open @BotFather in Telegram
+          2. send /newbot, give it a name and a username ending in "bot"
+          3. copy the token it replies with — 123456789:AA...
+        No app registration, no company, no OAuth. If you already have a bot,
+        /token gives you its token again.
+      required: true
+      secret: true
+    - name: TELEGRAM_ALLOWED_CHATS
+      prompt: |
+        Where this bot is ALLOWED to send — comma separated, e.g.
+          @my_channel,-1001234567890,123456789
+        Leave EMPTY (just press Enter) to install it read-only; sending will
+        then refuse until you fill this in. That is the safe default and it is
+        the recommended way to start.
+
+        To find a chat id: add the bot to the chat, send it a message, then run
+        tg_updates — the id is in the output.
+      required: false
+      secret: false
+
+post_install: |
+  Sending is allow-listed on purpose. Every other connector in this catalog is
+  read-only, because something installed from a picker by a person who will not
+  read its source should not be able to do damage. Telegram is the exception
+  where sending IS the feature — so instead of forbidding it, the destinations
+  are named in advance. With TELEGRAM_ALLOWED_CHATS empty, tg_send refuses
+  everything.
+
+  That turns "the model might message anyone" into "the model might message the
+  two chats you wrote down", which is a risk a person can weigh before saying
+  yes.
+
+  Two limits of the Bot API worth knowing before you promise anything on top:
+
+  * A bot CANNOT read chat history. There is no endpoint for it. tg_updates
+    returns only what arrived since the last poll, so "summarise this chat from
+    last month" is not possible with a bot token, by anyone.
+  * tg_updates CONSUMES updates. Telegram delivers each one once. If a gateway
+    polls this same token, messages read here are gone from its queue. The tool
+    refuses outright when a webhook is set, and warns otherwise.
+
+  A bot also cannot message a person who has never pressed Start on it — that
+  is Telegram's rule, not ours, and it shows up as a 403.

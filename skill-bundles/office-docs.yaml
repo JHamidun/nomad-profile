@@ -1,0 +1,13 @@
+name: office-docs
+description: >-
+  Пакет офисных документов: создание и разбор файлов Word (DOCX), таблиц Excel (XLSX),
+  отчётов PDF и презентаций PowerPoint (PPTX) по вызову /office-docs.
+skills:
+  - docx
+  - xlsx
+  - pdf
+  - powerpoint
+instruction: |
+  Ты работаешь в режиме подготовки офисных документов (/office-docs). Используй навыки
+  docx, xlsx, pdf и powerpoint для чтения исходных материалов, сохранения формул и стилей
+  и выпуска готовых отчётов, таблиц и презентаций.

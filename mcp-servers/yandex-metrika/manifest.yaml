@@ -1,0 +1,71 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: yandex-metrika
+description: Ask how a site is actually doing — visits and people (robots separated), traffic sources, top pages, goal conversions. Yandex Metrika is the analytics almost every Russian site runs. Read-only.
+source: https://yandex.ru/dev/metrika/
+
+# Runs on the install's OWN Python — the MCP SDK ships in the venv, so there is
+# no npx, no Node, and nothing to download at install time.
+#
+# ${PYTHON} is the interpreter Nomad itself runs on, substituted at install
+# time. NOT a bare `python`: the stdio child gets a filtered environment and
+# would resolve that through whatever PATH it inherits, which can be a system
+# interpreter with no MCP SDK — the server then dies at startup into a log
+# line, and the entry looks installed but has no tools.
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+  # stdio children get a filtered environment, so a value saved by the auth
+  # prompt below is invisible to this process unless it is named here. The
+  # ${...} placeholder goes into config.yaml verbatim and is resolved at
+  # connect time from ~/.hermes/.env — the token never lands in config.yaml.
+  env:
+    YANDEX_OAUTH_TOKEN: "${YANDEX_OAUTH_TOKEN}"
+    YANDEX_METRIKA_COUNTER_ID: "${YANDEX_METRIKA_COUNTER_ID}"
+
+auth:
+  type: api_key
+  env:
+    - name: YANDEX_OAUTH_TOKEN
+      prompt: |
+        Yandex OAuth token with the Metrika read permission:
+          1. open https://oauth.yandex.ru/ and log in with the account that owns the counter
+          2. create an app and tick «Яндекс Метрика: получение статистики» (metrika:read)
+          3. open https://oauth.yandex.ru/authorize?response_type=token&client_id=<your app id>
+          4. copy the token out of the address bar
+        The same token also covers Disk and Mail — the yandex-disk and
+        yandex-mail entries reuse this exact value.
+      required: true
+      secret: true
+    - name: YANDEX_METRIKA_COUNTER_ID
+      prompt: |
+        Default counter id — OPTIONAL. Set it and you can ask "how is the site
+        doing" without naming a counter every time. `metrika_counters` lists
+        every counter the token can see.
+      required: false
+      secret: false
+
+post_install: |
+  When to enable: you want the agent to answer "how is the site doing" without
+  you opening the Metrika dashboard and building a report.
+
+  Start with `metrika_counters` — it lists every site this token can read, with
+  ids for the other tools. Then `metrika_traffic` for the headline numbers,
+  `metrika_sources` for where people came from, `metrika_pages` for what they
+  read, `metrika_goals` for conversions.
+
+  Robots are excluded from every report by default (ym:s:isRobot=='No'), and
+  the robot share is printed separately. This is not cosmetic: a portal
+  measured at ~48 000 "visits" turned out to be 936 people and 47 347 crawlers.
+  A number that silently includes bots is worse than no number, because
+  somebody puts it in a deck.
+
+  Read-only by design. Nothing here creates, edits or deletes a counter, a
+  goal or a filter, so installing it can lose you nothing.
+
+  If `metrika_goals` says no goals are configured, that is the honest answer
+  rather than a zero: without goals Metrika measures visits, not outcomes.

@@ -16,8 +16,9 @@
 #   · путь подписки Anthropic — user-agent claude-code/<версия> (external, cli) + x-app cli.
 #     Протокольная личность клиента подписки: подмена сломает авторизацию. Не трогаем.
 #   · Kimi на проводе Anthropic и OpenCode — до них настройка не доходит, закрывает патч P3.
-#   · originator официального эндпоинта Codex — перекрывается, но принимает ли их сторона
-#     незнакомое имя, не проверено; нужна живая проба (см. patches/P3-attribution-config/test.md).
+#   · originator официального эндпоинта Codex — настройка model.default_headers до него не доходит;
+#     закрывает патч P8 (M-046): сохраняет протокольный codex_cli_rs для chatgpt.com/backend-api
+#     и берёт первое слово X-Title в нижнем регистре на совместимых провайдерах.
 model:
   default_headers:
     User-Agent: "NomadAgent/0.1.0"      # версия подставляется сборкой
@@ -47,8 +48,11 @@ auxiliary:
     base_url: https://openrouter.ai/api/v1
     # Stops model discovery (:4797-4799); known model ID in auxiliary_client.py:910.
     model: google/gemini-3.6-flash
-    # Resolve only a user-supplied key, never ship one (:5800-5803).
-    key_env: OPENROUTER_API_KEY
+    # Resolve only a user-supplied key via env expansion, never ship one (M-085; recognized by _validate_config_key).
+    api_key: "${OPENROUTER_API_KEY}"
+
+# Не переключаться на запасных провайдеров мимо основного маршрута (задача M-097).
+fallback_providers: []
 
 # Disable anonymous Nous bootstrap even if the launcher enables guest onboarding.
 # hermes_cli/anon_auth.py:145-158, :563-564.
@@ -80,6 +84,9 @@ plugins:
 #   hermes config set nomad.pool_mode owner_machine
 # Всё, кроме ровно `owner_machine`, считается `shipped` — включая нечитаемый конфиг.
 nomad:
+  # Боевой адрес Control Plane по умолчанию (задача M-068). Перекрывается переменной окружения
+  # NOMADNET_CP_URL или настройкой plugins.entries.nomad.settings.cp_url.
+  control_plane_url: https://cp.nomadnet.ai
   pool_mode: shipped
   # Заслонка платных провайдеров (задача M-162 / N5, спека §3.6). По умолчанию платные API-дорожки
   # (deepseek, gemini, kimi, perplexity, yandex) заперты: переменная окружения с ключом в системе
@@ -104,6 +111,10 @@ nomad:
     weekly_window_pct: 20
     weekly_window_percent: 20
     weekly_window_share: 0.20
+  # Аренда внешних карточек роя в kanban.db (задача M-166 / N24, спека §2.4):
+  # явный TTL аренды в секундах без скрытого значения по умолчанию в коде (продление каждые TTL/3).
+  lease:
+    claim_ttl_s: 900
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Обновления
@@ -111,15 +122,33 @@ nomad:
 updates:
   # У владельца стоит false. Для покупателя обязателен снимок: без него откат после неудачного
   # обновления делать нечем. Приёмка W3-17: после `hermes update` в профиле появился снимок баз.
+  # Пассивная фоновая проверка GitHub (banner.py -> source_check.check_for_updates(passive=True))
+  # отключена, чтобы `hermes chat` не ходил в api.github.com (M-098 / PRB2: 0 внешних обращений).
   pre_update_backup: quick
+  check: false
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Внешний вид
+# Внешний вид (терминал и веб-дашборд)
 # ─────────────────────────────────────────────────────────────────────────────
 display:
   # Без этого баннер берёт кадуцей Гермеса и надпись HERMES AGENT (banner.py:964, :1025).
   # Приёмка: tools/check_skin.py — зелёный.
   skin: nomad
+
+dashboard:
+  # Тема веб-дашборда из <home>/dashboard-themes/nomad.yaml (задача M-074 / B7).
+  # Читается hermes_cli/web_routers/dashboard_ui.py:72 и web_server_dashboard.py:217
+  # (_render_active_theme_bootstrap_css) и отдаёт палитру Nomad на первом же рендере.
+  theme: nomad
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Навыки (задача M-075 / W3-08)
+# ─────────────────────────────────────────────────────────────────────────────
+# Внешние каталоги навыков (hermes_cli/config_defaults.py:1449, agent/skill_utils.py:320).
+# Относительные пути считаются от HERMES_HOME; навыки, объявленные во внешних каталогах,
+# tools/skills_sync.py:295 (_defer_to_external) не дублирует в локальное дерево.
+skills:
+  external_dirs: []
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Диспетчер kanban.db (задачи M-159, M-189)
@@ -136,13 +165,216 @@ kanban:
   max_in_progress: 25
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Терминальные предохранители SAF1(а,б) (задача M-108, спека §6 SAF1)
+# ─────────────────────────────────────────────────────────────────────────────
+# Правила approvals.deny проверяются ядром в tools/approval_floors.py:217, :300 ДО проверки
+# флага --yolo (HERMES_YOLO_MODE) и approvals.mode: off — совпавшая команда безусловно
+# блокируется с записью в журнал даже у автономного воркера роя.
+approvals:
+  deny:
+    # Запрет принудительной перезаписи удалённых веток (длинный флаг --force / --force-with-lease):
+    # необратимо стирает коммиты в общем репозитории даже при запуске воркера с --yolo.
+    - "*git push*--force*"
+    # Запрет короткого флага принудительного пуша (`git push -f ...`): та же защита удалённой истории.
+    - "*git push*-f *"
+    # Запрет жёсткого сброса рабочего дерева и индекса (`git reset --hard`): уничтожает незакоммиченные
+    # изменения пользователя и соседних задач без возможности восстановления из git reflog.
+    - "*git reset --hard*"
+    # Запрет рекурсивного принудительного удаления через PowerShell (`Remove-Item -Recurse -Force`):
+    # штатный HARDLINE_PATTERNS ядра ловит POSIX `rm -rf /`, но не командлет PowerShell на Windows.
+    - "*Remove-Item*-Recurse*-Force*"
+    # Запрет зеркального порядка флагов `Remove-Item -Force -Recurse` в PowerShell на Windows.
+    - "*Remove-Item*-Force*-Recurse*"
+    # Запрет интерактивной/скриптовой переразметки дисков через `diskpart` на Windows: в DANGEROUS_PATTERNS
+    # он лишь запрашивает подтверждение и под --yolo прошёл бы без спроса.
+    - "*diskpart*"
+    # Запрет удаления веток системного реестра Windows (`reg delete`): под --yolo штатный детектор
+    # пропускает DANGEROUS_PATTERNS, поэтому фиксируем безусловный запрет в approvals.deny.
+    - "*reg delete*"
+    # Запрет остановки или перезагрузки хост-машины через командлеты PowerShell (`Stop-Computer`,
+    # `Restart-Computer`): выключает хост вместе со шлюзом и всеми активными воркерами роя.
+    - "*Stop-Computer*"
+    # Запрет перезагрузки хоста через PowerShell `Restart-Computer` (пара к `Stop-Computer`).
+    - "*Restart-Computer*"
+
+# Постоянный белый список команд терминала (tools/approval_floors.py:188, tools/approval.py:168).
+# Команды из этого списка (без неэкранированных операторов оболочки `;`, `|`, `&`, `>`, `$()`)
+# проходят через check_all_command_guards без интерактивного запроса подтверждения.
+command_allowlist:
+  # Чтение состояния рабочей копии git воркерами и проверками перед коммитом.
+  - "git status*"
+  # Просмотр диффа рабочей копии и коммитов при ревью и самопроверке воркера.
+  - "git diff*"
+  # Чтение истории коммитов репозитория при анализе контекста задачи.
+  - "git log*"
+  # Штатная уборка временных веток карточек `task/*` после слияния ворктри: в DANGEROUS_PATTERNS
+  # любой `git branch -D` помечен как опасный, но ветки с префиксом `task/` создаются самим роем.
+  - "git branch -D task/*"
+  # Запуск тестового набора проекта напрямую через `pytest` на гейтах верификации.
+  - "pytest *"
+  # Модульный запуск `python -m pytest` в виртуальном окружении проекта без ручного подтверждения.
+  - "python -m pytest *"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Делегирование под-агентов и голосовой ввод (задача M-085 / W3-17)
+# ─────────────────────────────────────────────────────────────────────────────
+# Потолок одновременно запущенных дочерних под-агентов внутри одного воркера (в апстриме по умолчанию 10,
+# hermes_cli/config_defaults.py). Задаём 3, чтобы один воркер не раздувал дерево процессов при параллельной
+# работе роя; общая ширина роя (25 параллельно) задаётся отдельно в nomad.swarm и kanban.max_in_progress (M-189).
+delegation:
+  max_concurrent_children: 3
+
+# Распознавание речи (STT): в апстриме по умолчанию стоит "en", что ломает транскрибацию русской речи.
+# Пустая строка включает автоопределение языка (русский / смешанный RU+EN) без принудительного английского.
+stt:
+  language: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Статичная обрезка промпта без модели (задача M-247 / J-006 / W3-17)
+# ─────────────────────────────────────────────────────────────────────────────
+# Отключение нестабильного зонда окружения Python (tools/env_probe.py): строка «Python toolchain»
+# даёт варианты между сессиями и рвёт префиксный кэш DeepSeek/Sonnet после ~1 920 токенов (R-token-anatomy).
+# При выключении системный промпт побайтно одинаков (md5) между сессиями, давая кэш >= 80%.
+agent:
+  environment_probe: false
+
+# Откладывание тяжёлых схем инструментов (надмножество _DEFAULT_DEFERRED_TOOLS ядра):
+# схемы инструментов первого запроса ужимаются с 9 067 до <= 5 000 токенов o200k (25 -> 12 инструментов).
+# Отложенные схемы (браузер browser_*, delegate_task, execute_code, memory, search_files и др.)
+# вызываются моделью через прогрессивный мост tool_search / tool_describe / tool_call.
+tools:
+  tool_search:
+    defer:
+      - annotate_preview
+      - apply_layout
+      - browser_back
+      - browser_cdp
+      - browser_click
+      - browser_console
+      - browser_dialog
+      - browser_exec
+      - browser_get_images
+      - browser_navigate
+      - browser_press
+      - browser_scroll
+      - browser_snapshot
+      - browser_type
+      - browser_vault_enter_code
+      - browser_vault_fill
+      - browser_vault_list
+      - browser_vault_save_login
+      - browser_vault_unlock
+      - browser_vision
+      - clarify
+      - close_terminal
+      - computer_use
+      - cronjob_manage
+      - delegate_task
+      - desktop_preview
+      - desktop_project
+      - drive_preview
+      - execute_code
+      - focus_pane
+      - gui_tour
+      - image_generate
+      - manage_catalog
+      - memory
+      - process_manage
+      - read_terminal
+      - read_window_below
+      - search_files
+      - session_search
+      - show_tip
+      - text_to_speech
+      - todo_list
+      - vision_analyze
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Штатные MCP-серверы поставки Nomad (задача M-080 / W3-11)
+# ─────────────────────────────────────────────────────────────────────────────
+# Девять собственных MCP-серверов размещены в package/mcp-servers/<name>/server.py и объявлены напрямую
+# в mcp_servers: (отдельный mcp.json упразднён: ядро читает config.yaml -> mcp_servers в hermes_cli/mcp_config.py
+# и tools/mcp_tool.py). Поле tools у каждого сервера — словарь (dict) для тонкой фильтрации include/exclude.
+# При включённом nomad.ru_only: true серверы ru-*, yandex-* и bitrix24 проверяют белый список РФ/TLS до сокета.
+mcp_servers:
+  # CRM и задачи Битрикс24 через входящий REST-вебхук портала
+  bitrix24:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/bitrix24/server.py"
+    env:
+      BITRIX24_WEBHOOK_URL: "${BITRIX24_WEBHOOK_URL}"
+    tools: {}
+  # Локальная база знаний профиля (индексация и полнотекстовый поиск документов)
+  knowledge-base:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/knowledge-base/server.py"
+    env:
+      KNOWLEDGE_BASE_DIR: "${HERMES_HOME}/knowledge"
+    tools: {}
+  # Локальный мост к классическому Microsoft Outlook на Windows через MAPI COM
+  outlook-local:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/outlook-local/server.py"
+    env: {}
+    tools: {}
+  # Проверка российских контрагентов (ЕГРЮЛ/ЕГРИП/ФНС) по ИНН и ОГРН через DaData РФ
+  ru-counterparty:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/ru-counterparty/server.py"
+    env:
+      DADATA_API_KEY: "${DADATA_API_KEY}"
+      DADATA_SECRET_KEY: "${DADATA_SECRET_KEY}"
+    tools: {}
+  # Открытые государственные данные РФ и курсы Банка России (cbr.ru / data.gov.ru)
+  ru-open-data:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/ru-open-data/server.py"
+    env: {}
+    tools: {}
+  # Отправка уведомлений и проверка статуса бота через Telegram Bot API
+  telegram-bot:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/telegram-bot/server.py"
+    env:
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      TELEGRAM_DEFAULT_CHAT_ID: "${TELEGRAM_DEFAULT_CHAT_ID}"
+    tools: {}
+  # Облачное хранилище Яндекс.Диск через официальный REST API cloud-api.yandex.net
+  yandex-disk:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/yandex-disk/server.py"
+    env:
+      YANDEX_DISK_TOKEN: "${YANDEX_DISK_TOKEN}"
+    tools: {}
+  # Почтовый клиент Яндекс.Почты по защищённым протоколам IMAP/SMTP (imap.yandex.ru / smtp.yandex.ru)
+  yandex-mail:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/yandex-mail/server.py"
+    env:
+      YANDEX_MAIL_USER: "${YANDEX_MAIL_USER}"
+      YANDEX_MAIL_APP_PASSWORD: "${YANDEX_MAIL_APP_PASSWORD}"
+    tools: {}
+  # Веб-аналитика и счётчики Яндекс.Метрики через api-metrika.yandex.net
+  yandex-metrika:
+    command: "python"
+    args:
+      - "${HERMES_HOME}/mcp-servers/yandex-metrika/server.py"
+    env:
+      YANDEX_METRIKA_TOKEN: "${YANDEX_METRIKA_TOKEN}"
+    tools: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Ключи, которые ЕЩЁ НЕ внесены, и что каждый ждёт
 # ─────────────────────────────────────────────────────────────────────────────
-# delegation.max_concurrent_children, max_spawn_depth — отдельный срез задачи M-085 (потолок
-#                                под-агентов внутри одного воркера: max_concurrent_children = 3).
-#                                Ширина роя (25 параллельно) и потолки на цель/аккаунт/неделю
-#                                вынесены выше в nomad.swarm и kanban.max_in_progress (M-189).
 # compression.threshold, model_thresholds, protect_last_n — механизм у владельца уже настроен и
 #                                работает; трогать запрещено его же словами, для покупателя
 #                                значения выбираются отдельно и с замером.
-# stt.language, наборы навыков, ttl_minutes — волна 3 (W3-17), часть зависит от D10.
+# ttl_minutes — снят решением D06 (удалённый каталог моделей выключен: model_catalog.enabled: false).

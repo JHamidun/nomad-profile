@@ -1,0 +1,62 @@
+# Nomad catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: yandex-mail
+description: Read a Yandex mailbox over IMAP — list folders, search by subject or sender, read a message. Same OAuth token as yandex-disk. Read-only, and never marks mail as read.
+source: https://yandex.ru/support/mail/mail-clients/others.html
+
+# Standard library only — imaplib and email ship with Python, so nothing is
+# downloaded at install time. Runs on the install's own interpreter.
+transport:
+  type: stdio
+  command: "${PYTHON}"
+  args:
+    - "${INSTALL_DIR}/server.py"
+  env:
+    YANDEX_OAUTH_TOKEN: "${YANDEX_OAUTH_TOKEN}"
+    YANDEX_EMAIL: "${YANDEX_EMAIL}"
+
+auth:
+  type: api_key
+  env:
+    - name: YANDEX_OAUTH_TOKEN
+      prompt: |
+        Yandex OAuth token — the SAME one yandex-disk uses. If you already
+        installed that entry, paste the same value here.
+        Otherwise: https://oauth.yandex.ru/ → create an app with the
+        "Почта: чтение" (mail:imap_ro) permission, then open
+        https://oauth.yandex.ru/authorize?response_type=token&client_id=<app id>
+        and copy the token out of the address bar.
+      required: true
+      secret: true
+    - name: YANDEX_EMAIL
+      prompt: |
+        The full mailbox address the token belongs to, e.g. name@yandex.ru.
+        IMAP needs to know WHICH mailbox to open — the token alone does not say.
+      required: true
+      secret: false
+
+post_install: |
+  When to enable: you want the agent to look through your mail — find a thread,
+  pull a number out of a message, answer "did they ever reply about X".
+
+  IMAP must be switched on for the mailbox: Настройки → Почтовые программы →
+  "С сервера imap.yandex.ru по протоколу IMAP". Without it the connection is
+  refused no matter how good the token is.
+
+  Read-only in two senses. It cannot send, delete or move anything — and it
+  reads with BODY.PEEK, so skimming the inbox does NOT mark the user's unread
+  mail as read. An agent that silently clears the unread badge is a bug people
+  notice and never forgive.
+
+  One thing to know about what comes back: anyone can send the user an email,
+  so message text is the classic prompt-injection route. Bodies are returned
+  fenced and labelled as quoted correspondence, and the phrasings that exist
+  only to steer a model ("ignore previous instructions", "игнорируй предыдущие
+  инструкции") are neutralised in place so a human can still see they were
+  there. What a message SAYS is data, never a command.
+
+  Yandex Calendar is deliberately not here: it speaks CalDAV, which would need
+  a third-party dependency and break the "nothing downloads at install" promise.
+  It is a separate entry when someone does it properly.

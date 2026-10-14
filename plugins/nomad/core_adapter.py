@@ -44,6 +44,7 @@ __all__ = [
     "invalidate_env_cache",
     "kanban",
     "load_config",
+    "load_config_readonly",
     "load_env",
     "plugin_data_dir",
     "plugin_db",
@@ -88,11 +89,25 @@ def load_config() -> dict:
     return core_config.load_config()
 
 
-def save_config(config: dict) -> None:
+def load_config_readonly() -> dict:
+    """Read-only cached view of the active profile's merged config."""
+    from hermes_cli import config as core_config
+
+    return core_config.load_config_readonly()
+
+
+def save_config(
+    config: dict,
+    *,
+    preserve_keys: Optional[set[tuple[str, ...]]] = None,
+) -> None:
     """Write ``config.yaml`` the way ``hermes config set`` does (may silently refuse: managed)."""
     from hermes_cli import config as core_config
 
-    core_config.save_config(config)
+    if preserve_keys is not None:
+        core_config.save_config(config, preserve_keys=preserve_keys)
+    else:
+        core_config.save_config(config)
 
 
 def get_config_path() -> Path:
