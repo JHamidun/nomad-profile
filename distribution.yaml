@@ -1,0 +1,49 @@
+# Манифест поставки профиля Nomad. Читается hermes_cli/profile_distribution.py:
+# read_manifest → DistributionManifest.from_dict. Поля и их типы — оттуда, не выдуманы.
+name: nomad
+version: 0.1.0
+description: >-
+  Nomad — коммерческая сборка агента для русскоязычного покупателя: свой бренд, русский
+  интерфейс, оплата через Control Plane, пакет навыков и MCP-серверов.
+# Минимальная версия ядра. Проверяется check_hermes_requires (:206) по semver: одна клауза.
+# Та же строка — hermes.requires в plugins/nomad/contract.yaml и requires_hermes в plugin.yaml
+# (сверяет tests/test_selfcheck.py).
+hermes_requires: ">=0.21.0"
+author: NomadNet
+license: proprietary
+
+# Переменные окружения, которые установка спросит у покупателя и положит в .env профиля
+# (_env_template_from_manifest, :199). required по умолчанию true — ставим false там,
+# где без переменной продукт всё равно работает.
+env_requires:
+  - name: NOMADNET_LICENSE_KEY
+    description: Ключ лицензии Nomad — выдаётся после оплаты
+  - name: NOMADNET_CP_URL
+    description: Адрес Control Plane. Пусто = боевой адрес по умолчанию
+    required: false
+  - name: OPENROUTER_API_KEY
+    description: Ключ OpenRouter, если работаешь через него
+    required: false
+
+# ВАЖНО: список задаётся целиком и намеренно.
+# DEFAULT_DIST_OWNED (:32) = SOUL.md, config.yaml, mcp.json, skills, cron, distribution.yaml —
+# в него НЕ входят plugins/, skins/, dashboard-themes/, то есть без явного списка наш бренд,
+# плагины и темы при установке профиля просто не приедут.
+distribution_owned:
+  - distribution.yaml
+  - SOUL.md
+  - config.yaml
+  - mcp.json
+  - skills
+  - skill-bundles
+  - plugins
+  - desktop-plugins
+  - skins
+  - dashboard-themes
+  # Шлюзовые хуки (<home>/hooks/<имя>/HOOK.yaml + handler.py). hooks/nomad-loop стартует цикл
+  # дирижёра на gateway:startup. В DEFAULT_DIST_OWNED их нет — без этой строки хук не приедет,
+  # а плагин приедет, и цикл молча не запустится никогда.
+  - hooks
+  # Список путей, снятых с поставки: самопроверка плагина удаляет их из профиля на старте
+  # (plugins/nomad/selfcheck.py). Без этой строки список в профиль не приедет.
+  - nomad-retired.yaml

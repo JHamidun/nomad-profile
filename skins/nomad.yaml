@@ -1,0 +1,84 @@
+# Скин Nomad для терминала. Кладётся в <hermes home>/skins/nomad.yaml.
+#
+# Зачем он вообще нужен: если скин не задан, баннер берёт HERMES_CADUCEUS и HERMES_AGENT_LOGO
+# (banner.py:964 и :1025 — оба через `getattr(..., None) or <штатная картинка>`). То есть покупатель
+# на первом же запуске видит кадуцей Гермеса и надпись HERMES AGENT. Пустая строка здесь не
+# помогает: `or` считает её ложной и подставляет штатную картинку. Значит обе картинки обязаны
+# быть непустыми.
+#
+# Палитра НЕ придумана: значения взяты из apps/desktop/src/themes/presets.ts → nousTheme.darkColors
+# через nomad_cli/dashboard_auth/login_page.py:103-117 замороженного форка.
+#   #05071C NAVY_DEEP · #14121E NAVY_CARD · #1F2350 NAVY_RAISED · #EEF1FB текст · #A6AAC6 текст тусклый
+#   #29A9FF sky · #4FC0FF sky-lit · #2D2FE8 NOMAD_DEEP (identity) · #CC7357 коралл (рационированный)
+#   #262A3A волосяная линия · #D9534F опасность
+name: nomad
+description: Nomad — ночное небо над дюнами
+
+colors:
+  banner_border: "#262A3A"
+  banner_title: "#4FC0FF"
+  banner_accent: "#29A9FF"
+  banner_dim: "#A6AAC6"
+  banner_text: "#EEF1FB"
+  ui_accent: "#29A9FF"
+  ui_label: "#A6AAC6"
+  ui_ok: "#4caf50"
+  ui_error: "#D9534F"
+  ui_warn: "#CC7357"
+  prompt: "#EEF1FB"
+  input_rule: "#262A3A"
+  response_border: "#2D2FE8"
+  status_bar_bg: "#05071C"
+  status_bar_text: "#A6AAC6"
+  status_bar_strong: "#4FC0FF"
+  status_bar_dim: "#262A3A"
+  status_bar_good: "#4caf50"
+  status_bar_warn: "#CC7357"
+  status_bar_bad: "#CC7357"
+  status_bar_critical: "#D9534F"
+  session_label: "#A6AAC6"
+
+# Светлая пара НАМЕРЕННО не заполняется целиком: по комментарию skin_engine.py:397-399 пустой блок
+# означает «ручного варианта для этой полярности нет», и потребители берут `colors` с автоматической
+# адаптацией — это лучше, чем золотая светлая палитра дефолта под нашим синим скином.
+light_colors:
+  banner_title: "#1B4F8C"
+  banner_accent: "#2D2FE8"
+  banner_text: "#141A2E"
+  prompt: "#141A2E"
+  ui_accent: "#2D2FE8"
+
+branding:
+  agent_name: "Nomad"
+  welcome: "Добро пожаловать в Nomad. Напишите, что нужно сделать, или /help — список команд."
+  goodbye: "До связи ✦"
+  response_label: " ✦ Nomad "
+  prompt_symbol: "❯"
+  help_header: "Команды"
+
+tool_prefix: "┊"
+
+# Логотип: NOMAD в том же блочном начертании, что штатный HERMES AGENT (6 строк), градиент сверху
+# вниз sky-lit → sky → identity blue.
+banner_logo: |-
+  [bold #4FC0FF]███╗   ██╗ ██████╗ ███╗   ███╗ █████╗ ██████╗ [/]
+  [bold #4FC0FF]████╗  ██║██╔═══██╗████╗ ████║██╔══██╗██╔══██╗[/]
+  [#29A9FF]██╔██╗ ██║██║   ██║██╔████╔██║███████║██║  ██║[/]
+  [#29A9FF]██║╚██╗██║██║   ██║██║╚██╔╝██║██╔══██║██║  ██║[/]
+  [#2D2FE8]██║ ╚████║╚██████╔╝██║ ╚═╝ ██║██║  ██║██████╔╝[/]
+  [#2D2FE8]╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝ [/]
+
+# Картинка слева от баннера — вместо кадуцея. Ночное небо над дюнами: звёзды sky-lit, гребень
+# тронут кораллом (единственное место, где он появляется), тело дюн от raised к deep.
+banner_hero: |-
+  [#4FC0FF]        ·              ✦           [/]
+  [#4FC0FF]                                   [/]
+  [#29A9FF]                 ·          ·      [/]
+  [#4FC0FF]     ✧                             [/]
+  [#29A9FF]                                   [/]
+  [#A6AAC6]              ⋯                    [/]
+  [#CC7357]        ▁▂▃▄▅▆▇███▇▆▅▄▃▂▁          [/]
+  [#1F2350]      ▂▃▄▅▆▇█████████████▇▆▅▄▃▂    [/]
+  [#1F2350]   ▃▄▅▆▇█████████████████████▇▆▅▄▃ [/]
+  [#2D2FE8] ▄▅▆▇███████████████████████████▇▆▅[/]
+  [#05071C]███████████████████████████████████[/]

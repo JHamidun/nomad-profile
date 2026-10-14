@@ -1,0 +1,148 @@
+# Шаблон настроек Nomad. ЧЕРНОВИК: заполнены только ключи, чьё действие я проверил запуском.
+# Правило задачи W3-17: шаблон собирается ИЗ СПИСКА КЛЮЧЕЙ С ОБОСНОВАНИЕМ У КАЖДОГО, а не
+# копированием конфига владельца. Причина конкретная: у владельца стоит
+# updates.pre_update_backup: false, и копия его конфига лишила бы каждого покупателя штатного
+# снимка баз перед обновлением — того самого, на который опирается вся стратегия откатов.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Отпечаток клиента — проверено запуском 20.09.2026
+# ─────────────────────────────────────────────────────────────────────────────
+# Эти три заголовка — то, что видит поставщик модели. Ключ model.default_headers сливается ПОВЕРХ
+# штатных заголовков, и пользователь побеждает (agent/auxiliary_client.py:826
+# _apply_user_default_headers). Замер: с этим блоком build_or_headers() отдаёт наши значения
+# вместо hermes-agent.nousresearch.com / Hermes Agent / HermesAgent.
+#
+# Границы, которые эта настройка НЕ закрывает (и почему так и оставлено):
+#   · путь подписки Anthropic — user-agent claude-code/<версия> (external, cli) + x-app cli.
+#     Протокольная личность клиента подписки: подмена сломает авторизацию. Не трогаем.
+#   · Kimi на проводе Anthropic и OpenCode — до них настройка не доходит, закрывает патч P3.
+#   · originator официального эндпоинта Codex — перекрывается, но принимает ли их сторона
+#     незнакомое имя, не проверено; нужна живая проба (см. patches/P3-attribution-config/test.md).
+model:
+  default_headers:
+    User-Agent: "NomadAgent/0.1.0"      # версия подставляется сборкой
+    X-Title: "Nomad"                     # это читает панель OpenRouter
+    HTTP-Referer: "https://hamidun.com"
+
+# No remote model manifest or periodic Portal recommendations (D06).
+# hermes_cli/model_catalog.py:209-211, :249-257; gateway/run_watchers.py:207-211.
+model_catalog:
+  enabled: false  # Stops the cold fetch and the gateway's +30s refresh.
+
+# Pin startup auxiliary routes instead of discovering OpenRouter -> Nous.
+# agent/auxiliary_client.py:5784-5857 reads these per-task overrides.
+auxiliary:
+  # Prevent text compression from entering provider discovery when keyless.
+  # agent/auxiliary_client.py:5178-5184, :6882-6890.
+  compression:
+    provider: deepseek
+  # tools/vision_tools.py:811-813 probes explicit THEN auto if no client exists.
+  # A provider name alone is insufficient without credentials. The explicit
+  # OpenRouter-compatible endpoint constructs a lazy client even while keyless,
+  # so the first probe succeeds without network and never reaches auto/Nous.
+  # agent/auxiliary_client.py:5367-5374, :4771-4809. Real inference needs a key.
+  vision:
+    provider: custom  # Selects the explicit-endpoint branch (:4771-4809).
+    # Stops base-URL discovery/Nous fallback (:5367-5374).
+    base_url: https://openrouter.ai/api/v1
+    # Stops model discovery (:4797-4799); known model ID in auxiliary_client.py:910.
+    model: google/gemini-3.6-flash
+    # Resolve only a user-supplied key, never ship one (:5800-5803).
+    key_env: OPENROUTER_API_KEY
+
+# Disable anonymous Nous bootstrap even if the launcher enables guest onboarding.
+# hermes_cli/anon_auth.py:145-158, :563-564.
+nous:
+  guest: false
+
+# Keep aggregate collection and transmission explicitly off in the shipped profile.
+# hermes_cli/config_defaults.py:2153-2161;
+# hermes_cli/observability/relay_shared_metrics.py:775-784.
+telemetry:
+  shared_metrics:
+    enabled: false  # Stops collection; config_defaults.py:2155 (default is also false).
+    send: false  # Stops the sender thread; relay_shared_metrics.py:775-784.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Плагин Nomad — проверено на живом шлюзе 21.09.2026
+# ─────────────────────────────────────────────────────────────────────────────
+# Плагины в Hermes включаются явно (opt-in): по умолчанию не включено ничего
+# (hermes_cli/plugins_cmd.py: `_config_name_set("plugins", "enabled")`). Без этой строки плагин
+# лежит в профиле, но не грузится, и хук gateway:startup честно пишет «conductor loop not
+# started — plugin 'nomad' is not enabled». То есть у покупателя дирижёр не запустился бы ни разу.
+plugins:
+  enabled:
+    - nomad
+
+# Режим поставки (задача N26). В проданной сборке — только `shipped`: дирижёр не пишет файлов с
+# кредами и не стартует дорожки из пула аккаунтов (запрет «intermediate credentials» в условиях
+# Anthropic). `owner_machine` ставится руками на машине владельца:
+#   hermes config set nomad.pool_mode owner_machine
+# Всё, кроме ровно `owner_machine`, считается `shipped` — включая нечитаемый конфиг.
+nomad:
+  pool_mode: shipped
+  # Заслонка платных провайдеров (задача M-162 / N5, спека §3.6). По умолчанию платные API-дорожки
+  # (deepseek, gemini, kimi, perplexity, yandex) заперты: переменная окружения с ключом в системе
+  # сама по себе не разрешает рою тратить деньги по счётчику. Покупатель включает провайдера явно:
+  #   hermes config set nomad.paid_provider_allowlist '[deepseek]'
+  paid_provider_allowlist: []
+  # Ширина роя и потолки на цель/аккаунт/неделю (задача M-189, спека §5.2 и §8 Q6).
+  # На Windows штатный потолок параллелизма по умолчанию None (MemTotal не читается,
+  # hermes_cli/config_defaults.py:72, :1925) — то есть потолка нет вовсе. Задаём явные числа:
+  #   · max_parallel: 25 — ответ владельца 20.09 (п. 10, спека §5.2).
+  #   · max_cards_per_goal: 100 — потолок карточек на одну цель до декомпозиции (спека §5.2,
+  #     ждёт подтверждения владельца в задаче M-190).
+  #   · max_sessions_per_account / sessions_per_account: 2 — максимум одновременных сессий на один
+  #     распознанный аккаунт подписки (спека §5.2, ждёт подтверждения в M-190).
+  #   · weekly_window_pct / weekly_window_percent: 20 (weekly_window_share: 0.20) — доля недельного
+  #     окна квоты на одну цель, 20 % (спека §5.2, ждёт подтверждения в M-190).
+  swarm:
+    max_parallel: 25
+    max_cards_per_goal: 100
+    max_sessions_per_account: 2
+    sessions_per_account: 2
+    weekly_window_pct: 20
+    weekly_window_percent: 20
+    weekly_window_share: 0.20
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Обновления
+# ─────────────────────────────────────────────────────────────────────────────
+updates:
+  # У владельца стоит false. Для покупателя обязателен снимок: без него откат после неудачного
+  # обновления делать нечем. Приёмка W3-17: после `hermes update` в профиле появился снимок баз.
+  pre_update_backup: quick
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Внешний вид
+# ─────────────────────────────────────────────────────────────────────────────
+display:
+  # Без этого баннер берёт кадуцей Гермеса и надпись HERMES AGENT (banner.py:964, :1025).
+  # Приёмка: tools/check_skin.py — зелёный.
+  skin: nomad
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Диспетчер kanban.db (задачи M-159, M-189)
+# ─────────────────────────────────────────────────────────────────────────────
+# Штатный автодиспетчер ядра (hermes_cli/kanban_db_dispatch.py:130) сверяет текущий профиль с
+# kanban.dispatch_profiles (строки 193–221): если профиля нет в списке, dispatch_once возвращает
+# {"skipped_nonspawnable": N} и не запускает ни одного воркера. В поставке Nomad разрешён только
+# профиль `nomad`.
+# На Windows штатный потолок kanban.max_in_progress по умолчанию None (hermes_cli/config_defaults.py:1925,
+# MemTotal из /proc/meminfo не читается) — задаём явное число 25 по ширине роя (задача M-189, спека §8 Q6).
+kanban:
+  dispatch_profiles:
+    - nomad
+  max_in_progress: 25
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ключи, которые ЕЩЁ НЕ внесены, и что каждый ждёт
+# ─────────────────────────────────────────────────────────────────────────────
+# delegation.max_concurrent_children, max_spawn_depth — отдельный срез задачи M-085 (потолок
+#                                под-агентов внутри одного воркера: max_concurrent_children = 3).
+#                                Ширина роя (25 параллельно) и потолки на цель/аккаунт/неделю
+#                                вынесены выше в nomad.swarm и kanban.max_in_progress (M-189).
+# compression.threshold, model_thresholds, protect_last_n — механизм у владельца уже настроен и
+#                                работает; трогать запрещено его же словами, для покупателя
+#                                значения выбираются отдельно и с замером.
+# stt.language, наборы навыков, ttl_minutes — волна 3 (W3-17), часть зависит от D10.

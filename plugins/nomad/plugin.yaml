@@ -1,0 +1,18 @@
+name: nomad
+version: 0.1.0
+manifest_version: 2
+requires_hermes: ">=0.21.0"
+api_version: 1
+description: >-
+  Nomad swarm orchestrator — swarm records in the plugin's own database, chat tools
+  swarm_start / swarm_show, the `hermes nomad` CLI and the pool_mode delivery guard.
+  The conductor loop is started by the gateway hook hooks/nomad-loop (gateway:startup).
+author: NomadNet
+license: proprietary
+provides_tools:
+  - swarm_start
+  - swarm_show
+provides_hooks:
+  - pre_tool_call
+  - post_api_request
+  - transform_api_error_classification

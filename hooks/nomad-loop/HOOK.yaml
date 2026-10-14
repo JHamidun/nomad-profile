@@ -1,0 +1,6 @@
+name: nomad-loop
+description: >-
+  Start the Nomad conductor loop when the gateway starts. Idempotent: a second
+  gateway:startup (or a reloaded hook registry) does not start a second loop.
+events:
+  - gateway:startup
