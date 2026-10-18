@@ -3514,6 +3514,77 @@ export function applyNomadVisualIdentityAndTooltips() {
           el.setAttribute('data-nomad-tooltip', tip)
         }
       }
+
+      // 8. Краткие описания и стоимость моделей ($вход / $выход за 1М токенов) в селекторе моделей композера
+      const MODEL_DROPDOWN_META = {
+        'NomadNet Auto': { desc: 'Умный Fugu/Jev роутер по сложности задачи', price: 'Авто · -68%' },
+        'nomadnet-auto': { desc: 'Умный Fugu/Jev роутер по сложности задачи', price: 'Авто · -68%' },
+        'Fable 5.1': { desc: 'Агентский флагман · сложный код и тулы · 1M', price: '$6 / $30' },
+        'Fable 5': { desc: 'Агентская разработка и оркестрация · 1M', price: '$5 / $25' },
+        'Opus 5.5': { desc: 'Максимум рассуждений и архитектуры · 1M', price: '$5 / $25' },
+        'Opus 5': { desc: 'Глубокая аналитика и рефакторинг · 1M', price: '$5 / $25' },
+        'Sonnet 5.5': { desc: 'Оптимальный баланс скорости и кода · 1M', price: '$3 / $15' },
+        'Sonnet 5': { desc: 'Быстрый продакшн-код и диалоги · 1M', price: '$3 / $15' },
+        'Haiku 5.5': { desc: 'Мгновенные ответы и лёгкие правки · 200K', price: '$0.8 / $4' },
+        'Opus 4.8': { desc: 'Тяжёлый анализ и архитектура · 1M', price: '$5 / $25' },
+        'Opus 4.7': { desc: 'Глубокий анализ и код · 1M', price: '$5 / $25' },
+        'Opus 4.6': { desc: 'Аналитика и проектирование (пред. поколение)', price: '$5 / $25' },
+        'Sonnet 4.6': { desc: 'Универсальная кодовая модель · 1M', price: '$3 / $15' },
+        'Opus 4.5': { desc: 'Сложные задачи (пред. поколение)', price: '$5 / $25' },
+        'Sonnet 4.5': { desc: 'Кодинг и работа с текстом (пред. поколение)', price: '$3 / $15' },
+        'Opus 4': { desc: 'Базовый Opus 4 · глубокий разбор', price: '$5 / $25' },
+        'Sonnet 4': { desc: 'Базовый Sonnet 4 · повседневный код', price: '$3 / $15' },
+        'Haiku 4.5': { desc: 'Быстрая компактная модель · 200K', price: '$0.8 / $4' },
+        'GPT-6.1-sol': { desc: 'Флагман кода и агентики · 400K контекст', price: '$2.5 / $10' },
+        'GPT-6.1-sol-900k': { desc: 'Флагман кода · длинный контекст 900K', price: '$2.5 / $10' },
+        'GPT-6-astra': { desc: 'Глубокий исследовательский разум · 400K', price: '$5 / $20' },
+        'GPT-6-astra-900k': { desc: 'Глубокий разум · весь репозиторий 900K', price: '$5 / $20' },
+        'GPT-6-sol': { desc: 'Универсальный флагман инженерии · 400K', price: '$2 / $8' },
+        'GPT-6-sol-900k': { desc: 'Инженерный флагман · контекст 900K', price: '$2 / $8' },
+        'GPT-6-luna': { desc: 'Быстрая и экономная для рутины · 200K', price: '$0.4 / $1.6' },
+        'GPT-6-luna-900k': { desc: 'Быстрая модель · длинный контекст 900K', price: '$0.4 / $1.6' },
+        'GPT-5.6-sol': { desc: 'Надёжный кодинг (режим Pro) · 400K', price: '$1.75 / $7' },
+        'GPT-5.6-sol-900k': { desc: 'Надёжный кодинг · контекст 900K', price: '$1.75 / $7' },
+        'GPT-5.6-terra': { desc: 'Быстрая математика, логика и алгоритмы', price: '$1.25 / $5' },
+        'GPT-5.6-terra-900k': { desc: 'Математика и алгоритмы · контекст 900K', price: '$1.25 / $5' },
+        'GPT-5.6-luna': { desc: 'Ультра-эконом для частых задач · 200K', price: '$0.25 / $1' },
+        'GPT-5.6-luna-900k': { desc: 'Ультра-эконом · длинный контекст 900K', price: '$0.25 / $1' },
+        'DeepSeek V4 Pro': { desc: 'Сильный кодинг и рассуждения · 128K', price: '$0.55 / $2.2' },
+        'DeepSeek': { desc: 'Супер-эконом Flash для быстрых задач · 128K', price: '$0.14 / $0.28' },
+        'Gemini 3.1 Pro': { desc: 'Мультимодальный флагман · 2M контекст', price: '$1.25 / $10' },
+        'Gemini 3.8 Flash': { desc: 'Новейший быстрый Flash · 1M контекст', price: '$0.3 / $2.4' },
+        'Gemini 3.7 Flash': { desc: 'Быстрый код и агентика · 1M контекст', price: '$0.15 / $0.6' },
+        'Kimi K3': { desc: 'Глубокий анализ и длинный контекст · 256K', price: '$1 / $4' },
+        'Kimi K2.7 Code': { desc: 'Специалист по коду и патчам · 256K', price: '$0.6 / $2.5' },
+        'YandexGPT 5 Pro': { desc: 'Суверенный контур РФ · 152-ФЗ · 32K', price: '1 200 ₽ / 1M' },
+        'GigaChat 2 Max': { desc: 'Флагман Сбера · 152-ФЗ · 128K', price: '1 500 ₽ / 1M' }
+      }
+      document.querySelectorAll('[data-slot="dropdown-menu-content"]').forEach(menu => {
+        const searchWrap = menu.querySelector('[data-slot="dropdown-menu-search"]')
+        if (!searchWrap) return
+        const searchInp = searchWrap.querySelector('input')
+        if (searchInp && searchInp.getAttribute('placeholder') !== 'Поиск модели (тариф: вход / выход за 1М токенов)…') {
+          searchInp.setAttribute('placeholder', 'Поиск модели (тариф: вход / выход за 1М токенов)…')
+        }
+        menu.querySelectorAll('[data-slot="dropdown-menu-sub-trigger"], [data-slot="dropdown-menu-item"]').forEach(item => {
+          const flexWrap = item.querySelector('span.flex-1')
+          const nameSpan = flexWrap ? flexWrap.querySelector('span.truncate') : item.querySelector('span.truncate')
+          if (!nameSpan) return
+          const rawName = (nameSpan.textContent || '').trim()
+          const meta = MODEL_DROPDOWN_META[rawName]
+          if (meta) {
+            if (nameSpan.getAttribute('data-nomad-model-desc') !== meta.desc) {
+              nameSpan.setAttribute('data-nomad-model-desc', meta.desc)
+            }
+            if (flexWrap && flexWrap.getAttribute('data-nomad-model-price') !== meta.price) {
+              flexWrap.setAttribute('data-nomad-model-price', meta.price)
+            }
+            if (item.getAttribute('data-nomad-model-price') !== meta.price) {
+              item.setAttribute('data-nomad-model-price', meta.price)
+            }
+          }
+        })
+      })
     } catch {
       // ignore DOM observer errors
     }
