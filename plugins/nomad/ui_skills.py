@@ -1026,6 +1026,339 @@ def api_refuse_curator_purge() -> dict[str, Any]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Коннекторы к российским корпоративным системам и MCP (на базе реверса «Искры» + MCP Nomad)
+# ---------------------------------------------------------------------------
+
+RF_CONNECTORS_CATALOG: tuple[dict[str, Any], ...] = (
+    {
+        "id": "1c-odata",
+        "title": "1С:Предприятие 8.3 (ERP, УТ, Бухгалтерия, ЗУП)",
+        "category": "ERP и Учёт РФ",
+        "badge": "OData v3 / HTTP-сервис · 152-ФЗ",
+        "description": "Прямое подключение к информационной базе 1С через стандартный интерфейс OData (`/odata/standard.odata`) или HTTP-сервис: чтение остатков, проведение счетов, сверка контрагентов, выгрузка ОСВ и кадровых приказов.",
+        "allowed_hosts": ["1c.company.ru", "erp.local", "10.0.0.0/8"],
+        "supports_vpn": True,
+        "mcp_server": None,
+        "skill_name": "1c-integration",
+        "fields": [
+            {"key": "ONEC_BASE_URL", "label": "URL публикации 1С OData", "placeholder": "https://1c.company.ru/buh/odata/standard.odata", "secret": False},
+            {"key": "ONEC_USERNAME", "label": "Пользователь 1С", "placeholder": "ai_bot_readonly", "secret": False},
+            {"key": "ONEC_PASSWORD", "label": "Пароль / Токен 1С", "placeholder": "••••••••••••", "secret": True},
+        ],
+    },
+    {
+        "id": "bitrix24",
+        "title": "Битрикс24 (CRM, Задачи, Диск и Живая лента)",
+        "category": "CRM и Портал РФ",
+        "badge": "Встроенный MCP · 152-ФЗ",
+        "description": "Нативный MCP-сервер `bitrix24` + корпоративные навыки: управление лидами, сделками, смарт-процессами, постановка задач, аналитика воронки продаж и отчёты руководителю.",
+        "allowed_hosts": ["bitrix24.ru", "bitrix24.by", "bitrix24.kz"],
+        "supports_vpn": True,
+        "mcp_server": "bitrix24",
+        "skill_name": "bitrix24",
+        "fields": [
+            {"key": "BITRIX24_WEBHOOK_URL", "label": "Входящий вебхук Битрикс24 (.ru)", "placeholder": "https://company.bitrix24.ru/rest/1/xxxxx/", "secret": True},
+        ],
+    },
+    {
+        "id": "diadoc",
+        "title": "Контур.Диадок и Контур.Фокус (ЮЗЭДО и Комплаенс)",
+        "category": "ЭДО и Налоги РФ",
+        "badge": "ЮЗЭДО · УКЭП · ФНС",
+        "description": "Работа с юридически значимым электронным документооборотом: проверка входящих УПД/актов/счетов-фактур (XML ФНС 5.02), сверка с договором и скоринг контрагентов в Контур.Фокус.",
+        "allowed_hosts": ["diadoc-api.kontur.ru", "focus-api.kontur.ru"],
+        "supports_vpn": False,
+        "mcp_server": "ru-counterparty",
+        "skill_name": "diadoc-sbis",
+        "fields": [
+            {"key": "DIADOC_API_KEY", "label": "Ключ разработчика Диадок (ddauth_api_client_id)", "placeholder": "client-id-xxxx...", "secret": True},
+            {"key": "DIADOC_BOX_ID", "label": "ID ящика организации в Диадок", "placeholder": "box-id@kontur.ru", "secret": False},
+            {"key": "KONTUR_FOCUS_API_KEY", "label": "Ключ API Контур.Фокус (опционально)", "placeholder": "focus-key...", "secret": True},
+        ],
+    },
+    {
+        "id": "sbis",
+        "title": "СБИС / Saby (ЭДО, Отчётность и Склад)",
+        "category": "ЭДО и Налоги РФ",
+        "badge": "JSON-RPC · Saby API",
+        "description": "Интеграция с экосистемой СБИС (Saby): получение и маршрутизация первичных документов ЭДО, контроль статусов подписания УКЭП и проверка реквизитов поставщиков.",
+        "allowed_hosts": ["online.sbis.ru", "api.sbis.ru"],
+        "supports_vpn": True,
+        "mcp_server": None,
+        "skill_name": "diadoc-sbis",
+        "fields": [
+            {"key": "SBIS_APP_CLIENT_ID", "label": "App Client ID сервисного приложения СБИС", "placeholder": "sbis-app-id...", "secret": False},
+            {"key": "SBIS_APP_SECRET", "label": "Защищённый ключ / Сервисный пароль СБИС", "placeholder": "••••••••••••", "secret": True},
+        ],
+    },
+    {
+        "id": "yandex-360",
+        "title": "Яндекс 360 для бизнеса (Почта, Диск, Трекер, Метрика)",
+        "category": "Офис и Аналитика РФ",
+        "badge": "3 встроенных MCP · 152-ФЗ",
+        "description": "Полный контур Яндекс 360 и Yandex Cloud: MCP-серверы `yandex-mail`, `yandex-disk`, `yandex-metrika` + Яндекс Трекер, Календарь, Wiki и Телемост.",
+        "allowed_hosts": ["cloud-api.yandex.net", "api.tracker.yandex.net", "api-metrika.yandex.net", "imap.yandex.ru"],
+        "supports_vpn": False,
+        "mcp_server": "yandex-disk",
+        "skill_name": "yandex-360",
+        "fields": [
+            {"key": "YANDEX_OAUTH_TOKEN", "label": "OAuth-токен Яндекс 360 / Диск / Метрика", "placeholder": "y0_AgAAAAA...", "secret": True},
+            {"key": "YANDEX_ORG_ID", "label": "ID организации Яндекс 360 / Трекер", "placeholder": "7800000", "secret": False},
+            {"key": "YANDEX_MAIL_USER", "label": "Корпоративный ящик Яндекс Почты", "placeholder": "user@company.ru", "secret": False},
+            {"key": "YANDEX_MAIL_APP_PASSWORD", "label": "Пароль приложения Яндекс Почты (IMAP/SMTP)", "placeholder": "••••••••••••", "secret": True},
+        ],
+    },
+    {
+        "id": "mts-link",
+        "title": "МТС Линк (Ktalk / Webinar · ВКС и Протоколы встреч)",
+        "category": "Коммуникации РФ",
+        "badge": "ВКС РФ · Авто-протоколы",
+        "description": "Автоматическая выгрузка записей совещаний из МТС Линк (Events / Курсы / Встречи), транскрибация на русском языке, выделение поручений с дедлайнами и отправка в Битрикс24 / Трекер.",
+        "allowed_hosts": ["userapi.mts-link.ru", "ktalk.ru"],
+        "supports_vpn": True,
+        "mcp_server": None,
+        "skill_name": "yandex-360",
+        "fields": [
+            {"key": "MTS_LINK_API_TOKEN", "label": "Токен доступа МТС Линк (x-auth-token)", "placeholder": "mts-link-token...", "secret": True},
+            {"key": "MTS_LINK_DOMAIN", "label": "Корпоративный домен МТС Линк / Ktalk", "placeholder": "company.mts-link.ru", "secret": False},
+        ],
+    },
+    {
+        "id": "fns-dadata-cbr",
+        "title": "ФНС ЕГРЮЛ/ГИР БО, DaData, Госзакупки 44-ФЗ/223-ФЗ и ЦБ РФ",
+        "category": "Госреестры и Финансы РФ",
+        "badge": "2 встроенных MCP · Госданные",
+        "description": "MCP-серверы `ru-counterparty` и `ru-open-data` + навыки госзакупок: проверка ИНН/ОГРН, бухотчётность ФНС (РСБУ Ф1/Ф2), курсы валют и ключевая ставка ЦБ РФ, тендеры ЕИС.",
+        "allowed_hosts": ["suggestions.dadata.ru", "cbr.ru", "www.cbr-xml-daily.ru", "bo.nalog.gov.ru", "zakupki.gov.ru"],
+        "supports_vpn": False,
+        "mcp_server": "ru-counterparty",
+        "skill_name": "fns-girbo",
+        "fields": [
+            {"key": "DADATA_API_KEY", "label": "API-ключ DaData.ru (реквизиты по ИНН)", "placeholder": "dadata-api-key...", "secret": True},
+            {"key": "DADATA_SECRET_KEY", "label": "Секретный ключ DaData (стандартизация)", "placeholder": "dadata-secret...", "secret": True},
+        ],
+    },
+    {
+        "id": "garant-consultant",
+        "title": "Гарант API и КонсультантПлюс (Правовой контур РФ)",
+        "category": "Юриспруденция РФ",
+        "badge": "НПА РФ · Судебная практика",
+        "description": "Верификация договоров по ГК РФ, ТК РФ, НК РФ и 152-ФЗ без галлюцинаций: поиск действующих редакций законов, писем Минфина/ФНС и постановлений Пленума ВС РФ.",
+        "allowed_hosts": ["api.garant.ru", "internet.garant.ru"],
+        "supports_vpn": True,
+        "mcp_server": None,
+        "skill_name": "ru-legal",
+        "fields": [
+            {"key": "GARANT_API_TOKEN", "label": "Токен доступа API Гарант", "placeholder": "Bearer garant-token...", "secret": True},
+            {"key": "CONSULTANT_LOCAL_URL", "label": "Локальный веб-сервер КонсультантПлюс (в контуре)", "placeholder": "https://cons.company.local", "secret": False},
+        ],
+    },
+    {
+        "id": "amocrm",
+        "title": "amoCRM (Сделки, Контакты и Автоматизация продаж)",
+        "category": "CRM и Портал РФ",
+        "badge": "amoCRM REST v4 · 152-ФЗ",
+        "description": "Чтение и обновление карточек сделок amoCRM, суммаризация звонков и переписок с клиентами, автозаполнение полей CRM и контроль SLA менеджеров.",
+        "allowed_hosts": ["amocrm.ru"],
+        "supports_vpn": False,
+        "mcp_server": None,
+        "skill_name": "amocrm",
+        "fields": [
+            {"key": "AMOCRM_SUBDOMAIN", "label": "Поддомен аккаунта amoCRM (.amocrm.ru)", "placeholder": "company.amocrm.ru", "secret": False},
+            {"key": "AMOCRM_ACCESS_TOKEN", "label": "Долгосрочный токен amoCRM", "placeholder": "eyJ0eXAiOiJKV1Qi...", "secret": True},
+        ],
+    },
+    {
+        "id": "kaiten-weeek",
+        "title": "Kaiten и WEEEK (Российские Agile-доски и База знаний)",
+        "category": "Управление проектами РФ",
+        "badge": "Импортозамещение Jira / Notion",
+        "description": "Управление карточками, спринтами, эпиками и базой знаний в российских сервисах Kaiten.ru и WEEEK.net.",
+        "allowed_hosts": ["kaiten.ru", "api.weeek.net"],
+        "supports_vpn": True,
+        "mcp_server": "knowledge-base",
+        "skill_name": "kaiten-weeek",
+        "fields": [
+            {"key": "KAITEN_BASE_URL", "label": "Домен Kaiten (например, company.kaiten.ru)", "placeholder": "https://company.kaiten.ru/api/latest", "secret": False},
+            {"key": "KAITEN_API_TOKEN", "label": "Токен API Kaiten / WEEEK", "placeholder": "kaiten-token...", "secret": True},
+        ],
+    },
+    {
+        "id": "vk-teams-max",
+        "title": "VK Teams, Мессенджер Max и Telegram Корп-Бот",
+        "category": "Коммуникации РФ",
+        "badge": "Встроенный MCP · Мессенджеры РФ",
+        "description": "Корпоративные боты и уведомления в VK Teams (myteam.mail.ru), национальном мессенджере Max и Telegram (`telegram-bot` MCP) с поддержкой on-premise инсталляций.",
+        "allowed_hosts": ["api.internal.myteam.mail.ru", "botapi.max.ru", "api.telegram.org"],
+        "supports_vpn": True,
+        "mcp_server": "telegram-bot",
+        "skill_name": "bitrix24",
+        "fields": [
+            {"key": "VK_TEAMS_BOT_TOKEN", "label": "Токен бота VK Teams / Max", "placeholder": "001.123456789...", "secret": True},
+            {"key": "VK_TEAMS_API_URL", "label": "URL сервера VK Teams (облако или On-Premise)", "placeholder": "https://api.internal.myteam.mail.ru/bot/v1", "secret": False},
+        ],
+    },
+)
+
+
+def list_rf_connectors(*, home: Path | None = None) -> dict[str, Any]:
+    """Вернуть каталог коннекторов к РФ-системам со статусом подключения и настроек VPN / Anti-SSRF."""
+    resolved_home = _resolve_home(home)
+    cfg = _load_profile_cfg(resolved_home)
+    nomad_cfg = cfg.get("nomad") if isinstance(cfg.get("nomad"), dict) else {}
+    saved_connectors = nomad_cfg.get("rf_connectors") if isinstance(nomad_cfg.get("rf_connectors"), dict) else {}
+
+    out: list[dict[str, Any]] = []
+    connected_count = 0
+    for item in RF_CONNECTORS_CATALOG:
+        cid = item["id"]
+        saved = saved_connectors.get(cid) if isinstance(saved_connectors.get(cid), dict) else {}
+        field_states: list[dict[str, Any]] = []
+        any_configured = bool(saved.get("enabled"))
+        for f in item["fields"]:
+            env_key = f["key"]
+            val = ""
+            try:
+                val = str(core_adapter.get_env_value(env_key) or "").strip()
+            except Exception:
+                val = ""
+            if not val and isinstance(saved.get("values"), dict):
+                val = str(saved["values"].get(env_key) or "").strip()
+            has_val = bool(val)
+            if has_val:
+                any_configured = True
+            preview = ""
+            if has_val:
+                if f.get("secret"):
+                    preview = f"••••{val[-4:]}" if len(val) >= 4 else "••••"
+                else:
+                    preview = val
+            field_states.append({
+                "key": env_key,
+                "label": f["label"],
+                "placeholder": f["placeholder"],
+                "secret": bool(f.get("secret")),
+                "configured": has_val,
+                "preview": preview,
+            })
+        if any_configured:
+            connected_count += 1
+        out.append({
+            **item,
+            "connected": any_configured,
+            "via_vpn": bool(saved.get("via_vpn", False)),
+            "custom_hosts": list(saved.get("custom_hosts") or []),
+            "fields": field_states,
+        })
+
+    return {
+        "ok": True,
+        "total": len(out),
+        "connected_count": connected_count,
+        "connectors": out,
+    }
+
+
+def configure_rf_connector(
+    connector_id: str,
+    values: dict[str, Any] | None = None,
+    *,
+    via_vpn: bool = False,
+    custom_hosts: list[str] | None = None,
+    enabled: bool = True,
+    home: Path | None = None,
+) -> dict[str, Any]:
+    """Сохранить настройки коннектора РФ с проверкой Anti-SSRF (запрет wildcard `*` в хостах)."""
+    cleaned_id = (connector_id or "").strip()
+    catalog_item = next((c for c in RF_CONNECTORS_CATALOG if c["id"] == cleaned_id), None)
+    if catalog_item is None:
+        raise KeyError(f"Коннектор РФ «{cleaned_id}» не найден в каталоге.")
+
+    hosts_clean: list[str] = []
+    for raw_h in (custom_hosts or []):
+        h = str(raw_h or "").strip().lower()
+        if not h:
+            continue
+        if "*" in h:
+            raise ValueError(
+                f"Недопустимый хост «{h}»: символы подстановки (*) запрещены политикой Anti-SSRF. Укажите точный домен или подсеть."
+            )
+        hosts_clean.append(h)
+
+    resolved_home = _resolve_home(home)
+    cfg = _load_profile_cfg(resolved_home)
+    nomad_cfg = cfg.get("nomad")
+    if not isinstance(nomad_cfg, dict):
+        nomad_cfg = {}
+    rf_map = nomad_cfg.get("rf_connectors")
+    if not isinstance(rf_map, dict):
+        rf_map = {}
+
+    prev_entry = rf_map.get(cleaned_id) if isinstance(rf_map.get(cleaned_id), dict) else {}
+    non_secret_values: dict[str, str] = dict(prev_entry.get("values") or {})
+
+    field_meta = {f["key"]: f for f in catalog_item["fields"]}
+    for k, v in (values or {}).items():
+        sval = str(v or "").strip()
+        if not sval:
+            continue
+        meta = field_meta.get(k)
+        if meta and not meta.get("secret"):
+            if "*" in sval and "URL" in k:
+                raise ValueError("URL эндпоинта не может содержать символ подстановки (*).")
+            non_secret_values[k] = sval
+        try:
+            core_adapter.save_env_value(k, sval)
+        except Exception:
+            non_secret_values[k] = sval
+
+    rf_map[cleaned_id] = {
+        "enabled": bool(enabled),
+        "via_vpn": bool(via_vpn),
+        "custom_hosts": hosts_clean,
+        "values": non_secret_values,
+        "updated_at": _now_iso(),
+    }
+    nomad_cfg["rf_connectors"] = rf_map
+    cfg["nomad"] = nomad_cfg
+    _save_profile_cfg(resolved_home, cfg)
+
+    state = list_rf_connectors(home=resolved_home)
+    updated = next((c for c in state["connectors"] if c["id"] == cleaned_id), None)
+    return {
+        "ok": True,
+        "connector": updated,
+        **state,
+    }
+
+
+@router.get("/skills/rf-connectors")
+def api_list_rf_connectors() -> dict[str, Any]:
+    return list_rf_connectors()
+
+
+@router.post("/skills/rf-connectors/configure")
+def api_configure_rf_connector(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        cid = str(payload.get("id") or payload.get("connector_id") or "").strip()
+        vals = payload.get("values") if isinstance(payload.get("values"), dict) else {}
+        via_vpn = bool(payload.get("via_vpn", False))
+        custom_hosts = payload.get("custom_hosts") if isinstance(payload.get("custom_hosts"), list) else []
+        enabled = bool(payload.get("enabled", True))
+        return configure_rf_connector(
+            cid,
+            vals,
+            via_vpn=via_vpn,
+            custom_hosts=custom_hosts,
+            enabled=enabled,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/skills/{skill_name}")
 def api_get_skill_detail(skill_name: str) -> dict[str, Any]:
     try:
@@ -1033,3 +1366,4 @@ def api_get_skill_detail(skill_name: str) -> dict[str, Any]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"ok": True, "skill": skill}
+

@@ -163,7 +163,7 @@ export function SwitchCard({ ctx, payload = null, onDismiss = null }) {
             padding: '7px 16px',
             borderRadius: '8px',
             border: 'none',
-            background: 'var(--primary, #2563eb)',
+            background: 'var(--primary, #18181B)',
             color: '#ffffff',
             fontSize: '13px',
             fontWeight: 500,

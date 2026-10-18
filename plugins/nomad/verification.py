@@ -282,17 +282,29 @@ def register_auxiliary_task(ctx: Any) -> bool:
     if not callable(reg_fn):
         return False
     budget = resolve_verification_budget()
-    reg_fn(
-        AUX_TASK_KEY,
-        display_name=AUX_TASK_DISPLAY_NAME,
-        description=AUX_TASK_DESCRIPTION,
-        defaults={
-            "provider": "auto",
-            "model": "",
-            "timeout": int(max(1, round(budget.judge_timeout))),
-        },
-        inherit_from=AUX_TASK_INHERIT_FROM,
-    )
+    try:
+        reg_fn(
+            AUX_TASK_KEY,
+            display_name=AUX_TASK_DISPLAY_NAME,
+            description=AUX_TASK_DESCRIPTION,
+            defaults={
+                "provider": "auto",
+                "model": "",
+                "timeout": int(max(1, round(budget.judge_timeout))),
+            },
+            inherit_from=AUX_TASK_INHERIT_FROM,
+        )
+    except TypeError:
+        reg_fn(
+            AUX_TASK_KEY,
+            display_name=AUX_TASK_DISPLAY_NAME,
+            description=AUX_TASK_DESCRIPTION,
+            defaults={
+                "provider": "auto",
+                "model": "",
+                "timeout": int(max(1, round(budget.judge_timeout))),
+            },
+        )
     return True
 
 

@@ -50,6 +50,14 @@ export function StatusbarBalance({ ctx, host }) {
   const balanceText = formatBalanceValue(data)
   const currency = typeof data?.currency === 'string' && data.currency.trim() ? data.currency.trim() : null
   const code = data?.code || data?.status || (state.status === 'error' ? 'unreachable' : null)
+  const statusLabels = {
+    'missing-key': 'Подключить тариф',
+    'cp-url-unset': 'Подключить тариф',
+    'invalid-key': 'Проверить ключ',
+    unreachable: 'Автономно',
+    disconnected: 'Не подключён',
+  }
+  const friendlyStatus = statusLabels[code] || code || 'Не подключён'
 
   const handleClick = () => {
     if (host && typeof host.navigate === 'function') {
@@ -62,7 +70,7 @@ export function StatusbarBalance({ ctx, host }) {
       type="button"
       onClick={handleClick}
       data-testid="nomad-statusbar-balance"
-      title={balanceText !== null ? `NomadNet balance: ${balanceText}${currency ? ' ' + currency : ''}` : `NomadNet: ${code || 'loading'}`}
+      title={balanceText !== null ? `Баланс NomadNet: ${balanceText}${currency ? ' ' + currency : ''}` : `NomadNet: ${friendlyStatus}`}
       className="flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
     >
       <span className="font-medium">NomadNet</span>
@@ -80,8 +88,8 @@ export function StatusbarBalance({ ctx, host }) {
         </span>
       )}
       {state.status !== 'loading' && balanceText === null && (
-        <span data-testid="nomad-balance-status" className="font-mono text-[10px] opacity-75">
-          {code || 'disconnected'}
+        <span data-testid="nomad-balance-status" className="text-[10px] opacity-80">
+          {friendlyStatus}
         </span>
       )}
     </button>

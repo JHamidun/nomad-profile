@@ -1,0 +1,27 @@
+{
+  "source": "hb2_routing_eval",
+  "date": "2026-10-15",
+  "bank_md5": "b2f6764491a9b2b540fbe3d969062325",
+  "alpha": 0.05,
+  "default_rule": "regex_ao",
+  "selected_rule": "regex_ao",
+  "selection_reason": "CI of bill difference crosses zero on hb2 evaluation; simpler regex_ao selected",
+  "status_quo_rung": "flash-think",
+  "classes": {
+    "bare_answer": "disabled",
+    "json_strict": "disabled",
+    "code_trace": "enabled",
+    "arith_chain": "enabled",
+    "logic_order": "enabled",
+    "open_work": "enabled"
+  },
+  "shrink_probabilities": {
+    "bare_answer": 0.15,
+    "json_strict": 0.20,
+    "code_trace": 0.95,
+    "arith_chain": 0.90,
+    "logic_order": 0.88,
+    "open_work": 0.82
+  },
+  "threshold": 0.50
+}

@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "slug": "omleton",
+  "display_name": "Омлетон 🍳",
+  "species": "fried egg mascot",
+  "description": "Маскот Омлетон 🍳 из коллекции Скрепки",
+  "frame_w": 192,
+  "frame_h": 208,
+  "frames_per_state": 8,
+  "frames_by_row": [
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8
+  ],
+  "loop_ms": 1100,
+  "scale": 0.52,
+  "state_rows": [
+    "idle",
+    "running-right",
+    "running-left",
+    "waving",
+    "jumping",
+    "failed",
+    "waiting",
+    "running",
+    "review"
+  ],
+  "spritesheet": "spritesheet.webp",
+  "created_at": 1775800000
+}

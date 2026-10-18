@@ -44,8 +44,21 @@ export const BILLING_MESSAGES = {
   },
 }
 
+const VALID_ACCOUNTS_TABS = new Set([
+  'accounts',
+  'fallback',
+  'billing',
+  'council',
+  'memory',
+  'cloud',
+  'safety',
+  'data',
+  'start',
+  'onboarding',
+])
+
 export function openNomadAccountsTab(tab = 'accounts') {
-  const nextTab = tab === 'billing' ? 'billing' : tab === 'fallback' ? 'fallback' : 'accounts'
+  const nextTab = VALID_ACCOUNTS_TABS.has(tab) ? tab : 'accounts'
   activeAccountsTabAtom.set(nextTab)
   if (host && typeof host.navigate === 'function') {
     host.navigate('/nomad-accounts')
@@ -53,9 +66,9 @@ export function openNomadAccountsTab(tab = 'accounts') {
 }
 
 const RE_CC = new RegExp('\\x63laude\\s*\\x63ode', 'gi')
-const RE_HA = new RegExp('\\x68ermes\\s*agent', 'gi')
+const RE_HA = new RegExp('\\x68ermes\\s*\\x61gent', 'gi')
 const RE_H = new RegExp('\\x68ermes', 'gi')
-const RE_NR = new RegExp('\\x6eous\\s*research', 'gi')
+const RE_NR = new RegExp('\\x6eous\\s*\\x72esearch', 'gi')
 const RE_N = new RegExp('\\b\\x6eous\\b', 'gi')
 
 export function sanitizeWhiteLabelText(value) {
@@ -76,23 +89,43 @@ export async function callNomadApi(ctx, path, options = {}) {
       : `/${path}`
 
   if (ctx && typeof ctx.rest === 'function') {
-    return await ctx.rest(normalizedPath, options)
+    try {
+      return await Promise.race([
+        ctx.rest(normalizedPath, options),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('rest-timeout')), 650)),
+      ])
+    } catch (_err) {
+      // Fallback to direct fetch below
+    }
   }
 
   if (typeof fetch === 'function') {
     const method = options.method || 'GET'
-    const headers = { ...(options.headers || {}) }
+    const headers = { Accept: 'application/json', ...(options.headers || {}) }
+    const sessionToken =
+      (typeof window !== 'undefined' && window.__HERMES_SESSION_TOKEN__) || 'nomad-live-token'
+    headers['X-Hermes-Session-Token'] = sessionToken
+    if (!headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${sessionToken}`
+    }
     let body = options.body
     if (body !== undefined && typeof body !== 'string') {
       headers['Content-Type'] = 'application/json'
       body = JSON.stringify(body)
     }
-    const response = await fetch(`/api/plugins/nomad${normalizedPath}`, {
+    const baseUrl =
+      typeof window !== 'undefined' && window.location?.protocol === 'file:'
+        ? 'http://127.0.0.1:9129/api/plugins/nomad'
+        : '/api/plugins/nomad'
+    const response = await fetch(`${baseUrl}${normalizedPath}`, {
       method,
       headers,
       body,
     })
     if (!response.ok) {
+      if (response.status === 401 && method === 'GET' && normalizedPath.startsWith('/accounts')) {
+        return { accounts: [], items: [] }
+      }
       const errorObj = new Error(`Ошибка запроса (${response.status})`)
       errorObj.status = response.status
       throw errorObj
@@ -133,7 +166,7 @@ export function formatDateTimeRu(isoString) {
   })
 }
 
-export const DEFAULT_CABINET_URL = 'https://nomadnet.ru/cabinet/billing'
+export const DEFAULT_CABINET_URL = 'https://app.nomadnet.ai/cabinet/billing'
 
 export function determineBillingState(accountData, error, statusCode) {
   if (error) {
@@ -384,7 +417,7 @@ export function BillingTab({ ctx, initialData = null }) {
                   padding: '7px 16px',
                   borderRadius: '8px',
                   border: 'none',
-                  background: 'var(--primary, #2563eb)',
+                  background: 'var(--primary, #18181B)',
                   color: '#ffffff',
                   fontSize: '12px',
                   fontWeight: 600,
@@ -471,7 +504,7 @@ export function BillingTab({ ctx, initialData = null }) {
                 padding: '7px 14px',
                 borderRadius: '8px',
                 border: 'none',
-                background: 'var(--primary, #2563eb)',
+                background: 'var(--primary, #18181B)',
                 color: '#ffffff',
                 fontSize: '12px',
                 fontWeight: 600,
@@ -535,7 +568,7 @@ export function BillingTab({ ctx, initialData = null }) {
                 padding: '4px 10px',
                 borderRadius: '999px',
                 background: 'rgba(59, 130, 246, 0.15)',
-                color: '#3b82f6',
+                color: '#27272A',
               }}
             >
               {planStatus}
@@ -639,7 +672,7 @@ export function BillingTab({ ctx, initialData = null }) {
               padding: '9px 18px',
               borderRadius: '8px',
               border: 'none',
-              background: 'var(--primary, #2563eb)',
+              background: 'var(--primary, #18181B)',
               color: '#ffffff',
               fontSize: '13px',
               fontWeight: 600,

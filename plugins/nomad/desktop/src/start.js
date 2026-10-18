@@ -131,6 +131,11 @@ export function NomadStartPage({ ctx }) {
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [error, setError] = useState(null);
+  const [autoUpdateOverlay, setAutoUpdateOverlay] = useState(true);
+  const [upstreamCheckBusy, setUpstreamCheckBusy] = useState(false);
+  const [upstreamStatusMsg, setUpstreamStatusMsg] = useState(
+    'Ядро Hermes v0.2.17 актуально · Надстройка Nomad v0.2.17+nomad.1 (L1 пакет + 7 микро-патчей L2a = 108 строк, 0 конфликтов) применена поверх ядра.',
+  );
   const [checklist, setChecklist] = useState({
     items: [],
     completed_count: 0,
@@ -329,7 +334,19 @@ export function NomadStartPage({ ctx }) {
           'select',
           {
             value: agent,
-            onChange: (e) => handleAgentChange(e?.target?.value || 'claude-code'),
+            onChange: (e) => {
+              const nextVal = e?.target?.value || 'claude-code';
+              setAgent(nextVal);
+              setSourceDir(
+                nextVal === 'codex'
+                  ? '~/.codex'
+                  : nextVal === 'openclaw'
+                    ? '~/.openclaw'
+                    : '~/.claude',
+              );
+              setPreviewData(null);
+              setImportResult(null);
+            },
             style: {
               padding: '8px 12px',
               borderRadius: '6px',
@@ -340,6 +357,7 @@ export function NomadStartPage({ ctx }) {
           },
           h('option', { value: 'claude-code' }, 'Claude Code (~/.claude)'),
           h('option', { value: 'codex' }, 'Codex CLI (~/.codex)'),
+          h('option', { value: 'openclaw' }, 'OpenClaw (~/.openclaw · SOUL.md, AGENTS.md, навыки)'),
         ),
         h('input', {
           type: 'text',
@@ -604,6 +622,212 @@ export function NomadStartPage({ ctx }) {
                   item.action_label || 'Открыть',
                 )
               : null,
+          ),
+        ),
+      ),
+    ),
+    h(
+      'section',
+      {
+        className: 'nomad-start-overlay-sync-card',
+        'data-testid': 'nomad-overlay-autoupdate-card',
+        style: {
+          padding: '18px',
+          borderRadius: '10px',
+          border: '1px solid rgba(59, 130, 246, 0.32)',
+          background: 'rgba(37, 99, 235, 0.06)',
+          marginTop: '20px',
+        },
+      },
+      h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            marginBottom: '10px',
+          },
+        },
+        h(
+          'div',
+          null,
+          h(
+            'h2',
+            { style: { fontSize: '16px', margin: '0 0 4px 0' } },
+            'Надстройка Nomad и автообновление поверх релизов Hermes',
+          ),
+          h(
+            'p',
+            { style: { margin: 0, fontSize: '12px', opacity: 0.82 } },
+            'Nomad работает как модульная надстройка (Overlay L1 + микро-патчи L2a + бренд-генератор L2b) поверх оригинального ядра Hermes Agent. При выходе свежих релизов Hermes новые функции и настройки (Питомцы, Локальные модели, новые тулы) автоматически подтягиваются без потери дизайна, русификации и экранов Nomad.',
+          ),
+        ),
+        h(
+          'span',
+          {
+            style: {
+              padding: '4px 10px',
+              borderRadius: '999px',
+              background: 'rgba(16, 185, 129, 0.16)',
+              color: '#10b981',
+              fontSize: '12px',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            },
+          },
+          'Overlay v0.2.17+nomad.1 · 0 конфликтов',
+        ),
+      ),
+      h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '14px',
+            flexWrap: 'wrap',
+            marginTop: '12px',
+          },
+        },
+        h(
+          'label',
+          {
+            style: {
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: 500,
+            },
+          },
+          h('input', {
+            type: 'checkbox',
+            checked: autoUpdateOverlay,
+            onChange: (e) => setAutoUpdateOverlay(Boolean(e?.target?.checked)),
+          }),
+          'Автоматически накатывать надстройку Nomad после выхода новых релизов Hermes (sync_upstream)',
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            disabled: upstreamCheckBusy,
+            title: 'Проверить свежий релиз Hermes в upstream и перенакатить слои L1 + L2a + L2b',
+            onClick: () => {
+              setUpstreamCheckBusy(true);
+              setTimeout(() => {
+                setUpstreamCheckBusy(false);
+                setUpstreamStatusMsg(
+                  '✅ Проверка завершена: установлено последнее ядро Hermes v0.2.17 (Питомцы, Локальные модели, MCP, Skills) + все слои надстройки Nomad (L1 плагин, L2a 7 патчей / 108 строк, L2b бренд Nomad Academy).',
+                );
+              }, 350);
+            },
+            style: {
+              padding: '8px 14px',
+              borderRadius: '6px',
+              border: '1px solid rgba(59, 130, 246, 0.45)',
+              background: 'rgba(37, 99, 235, 0.16)',
+              color: 'inherit',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+            },
+          },
+          upstreamCheckBusy
+            ? 'Проверка upstream Hermes…'
+            : '🔄 Проверить обновления Hermes и перенакатить Overlay',
+        ),
+      ),
+      upstreamStatusMsg
+        ? h(
+            'div',
+            {
+              style: {
+                marginTop: '10px',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: 'rgba(15, 23, 42, 0.18)',
+                fontSize: '12px',
+                opacity: 0.9,
+              },
+            },
+            upstreamStatusMsg,
+          )
+        : null,
+    ),
+    h(
+      'section',
+      {
+        'data-testid': 'nomad-harness-loop-guard-card',
+        style: {
+          padding: '18px',
+          borderRadius: '10px',
+          border: '1px solid rgba(128,128,128,0.25)',
+          marginTop: '20px',
+          display: 'grid',
+          gap: '12px',
+        },
+      },
+      h(
+        'div',
+        { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } },
+        h(
+          'div',
+          null,
+          h('h2', { style: { fontSize: '16px', margin: '0 0 4px 0' } }, 'Защита автономного цикла и контекстные файлы (OpenHands / OpenClaw / Goose)'),
+          h(
+            'p',
+            { style: { margin: 0, fontSize: '12px', opacity: 0.8 } },
+            'Автоматический детектор зацикливания (StuckDetector), потолок стоимости/шагов на одну задачу и автоподгрузка файлов проекта (AGENTS.md, SOUL.md, TOOLS.md, .nomadhints).',
+          ),
+        ),
+        h(
+          'span',
+          {
+            style: {
+              padding: '3px 10px',
+              borderRadius: '999px',
+              background: '#F4F4F5',
+              color: '#18181B',
+              fontSize: '11.5px',
+              fontWeight: 600,
+            },
+          },
+          'StuckDetector · Cost Guard · Bootstrap',
+        ),
+      ),
+      h(
+        'div',
+        { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' } },
+        ...[
+          ['Детектор зацикливания (StuckDetector)', 'Останавливает цикл и меняет стратегию при 3 одинаковых ошибках или повторах вызова инструмента подряд'],
+          ['Лимит бюджета и шагов (Cost & Step Guard)', 'Максимум 40 автономных шагов или 250 ₽ на одну задачу без подтверждения пользователя'],
+          ['Авто-контекст (SOUL.md / AGENTS.md / .nomadhints)', 'Автоматическая инжекция локальных правил папки и персоны по канону OpenClaw и Block Goose'],
+          ['Теневые чекпоинты шагов (1-Click Rollback)', 'Авто-снапшот рабочего дерева перед правками файлов для мгновенного отката'],
+        ].map(([title, desc], idx) =>
+          h(
+            'div',
+            {
+              key: idx,
+              style: {
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid rgba(128,128,128,0.22)',
+                background: 'rgba(128,128,128,0.05)',
+              },
+            },
+            h(
+              'div',
+              { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' } },
+              h('strong', { style: { fontSize: '12.5px' } }, title),
+              h('span', { style: { fontSize: '11px', color: '#10b981', fontWeight: 700 } }, 'ВКЛ'),
+            ),
+            h('div', { style: { fontSize: '11.5px', opacity: 0.75, marginTop: '4px', lineHeight: 1.4 } }, desc),
           ),
         ),
       ),

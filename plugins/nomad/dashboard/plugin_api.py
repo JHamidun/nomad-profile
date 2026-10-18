@@ -73,6 +73,9 @@ SCREENS: tuple[str, ...] = (
     "ui_data",
     "ui_start",
     "ui_stop",
+    "ui_council",
+    "ui_memory_projects",
+    "ui_cloud_remote",
 )
 
 router = APIRouter()
@@ -391,6 +394,152 @@ def activate_local_or_custom_model(payload: dict[str, Any] | None = None) -> dic
         "model": model_name,
         "provider": provider,
         "base_url": base_url,
+    }
+
+
+BUDDY_PERSONAS: dict[str, dict[str, str]] = {
+    "nika": {
+        "name": "Ника",
+        "role": "Технический бадди-проводник Nomad",
+        "system": (
+            "Ты — Ника, дружелюбный и заботливый ИИ-бадди внутри десктопного приложения Nomad. "
+            "Твоя задача — помогать пользователю преодолевать технические барьеры, простыми словами объяснять "
+            "любые настройки, ошибки, подключение российских моделей (GigaChat, YandexGPT, МТС AI Cotype, T-Pro, Cloud.ru), "
+            "корпоративных коннекторов РФ (1С OData, Битрикс24, Контур.Диадок, СБИС, Яндекс 360, МТС Линк, Гарант) "
+            "и гардрейлов ИБ 152-ФЗ. Отвечай по-русски, кратко, тепло и с конкретными шагами (1-2-3)."
+        ),
+    },
+    "sokrat": {
+        "name": "Сократ",
+        "role": "Ментор Академии и архитектурный советник",
+        "system": (
+            "Ты — Сократ, мудрый ИИ-ментор Академии Nomad. Твоя цель — учить пользователя мыслить как сильный "
+            "инженер и продакт-архитектор: разбирать задачи в Симуляторе ИИ, задавать точные наводящие вопросы, "
+            "объяснять, почему выбранная архитектура промптов, агентов или безопасности (152-ФЗ / DLP / Anti-SSRF) "
+            "работает именно так, и помогать расти от новичка до мастера. Отвечай по-русски, структурно и вдохновляюще."
+        ),
+    },
+}
+
+
+def _build_local_buddy_answer(persona_id: str, question: str, screen_context: str) -> str:
+    q = question.lower()
+    is_sokrat = persona_id == "sokrat"
+    prefix = "🏛️ **Сократ (Ментор Академии):**" if is_sokrat else "✨ **Ника (Твой бадди-проводник):**"
+
+    if any(k in q for k in ("гигачат", "gigachat", "яндекс", "yandex", "мтс", "cotype", "t-pro", "российск", "суверен")):
+        return (
+            f"{prefix}\n\n"
+            "Подключить российские суверенные модели (152-ФЗ) в Nomad можно за 30 секунд:\n"
+            "1. Открой раздел **«Аккаунты»** (`/nomad-accounts`) в левом меню.\n"
+            "2. В блоке **«🇷🇺 Российские суверенные модели (152-ФЗ)»** нажми кнопку **«+ Подключить»** на нужной карточке: **Сбер GigaChat**, **Яндекс (YandexGPT 5 Pro / Alice AI)**, **МТС AI (Cotype Pro 3 / Kodify)**, **Т-Банк (T-Pro 2.0)** или **Cloud.ru Evolution**.\n"
+            "3. Вставь API-ключ и нажми **«Сохранить в пул»** — эндпоинт подставится автоматически.\n"
+            "4. Если нужно жёстко запретить любые зарубежные модели по требованию ИБ, включи переключатель **«Суверенный контур РФ (152-ФЗ)»** в разделе **«Разрешения и безопасность»**."
+        )
+    if any(k in q for k in ("1с", "1c", "битрикс", "bitrix", "диадок", "diadoc", "сбис", "sbis", "коннектор", "мтс линк", "гарант")):
+        return (
+            f"{prefix}\n\n"
+            "Для подключения к корпоративным системам РФ:\n"
+            "1. Перейди в **«Навыки Nomad»** (`/nomad-skills`) → вкладка **«🔌 Коннекторы РФ и MCP»**.\n"
+            "2. Выбери нужную систему (**1С:Предприятие OData**, **Битрикс24**, **Контур.Диадок**, **СБИС Saby**, **Яндекс 360**, **МТС Линк**, **Гарант** или **ФНС/DaData**) и нажми **«Подключить за 1 клик»**.\n"
+            "3. Укажи URL/токен и при необходимости отметь галочку **«🔒 Маршрутизировать через корпоративный VPN-туннель (via_vpn)»**.\n"
+            "4. Все хосты проходят строгую проверку **Anti-SSRF** (без символов подстановки `*`), а секреты шифруются локально."
+        )
+    if any(k in q for k in ("безопасн", "152", "пдн", "dlp", "гардрейл", "ciso", "keychain", "прокси", "egress")):
+        return (
+            f"{prefix}\n\n"
+            "Вот как устроен корпоративный контур безопасности для ИБ и ИТ-службы в **«Разрешения и безопасность»** (`/nomad-safety`):\n"
+            "1. **Пресеты ИБ в 1 клик**: выбери *«🛡️ Корпоративный 152-ФЗ»* или *«🏛️ Банк / Госсектор / КИИ (Zero-Trust)»*.\n"
+            "2. **DLP-фильтр ПДн**: до отправки в любую нейросеть автоматически маскирует ФИО (`[ПДн:ФИО]`), паспорта, ИНН, СНИЛС, расчётные счета, телефоны и API-ключи. Прямо на странице есть **интерактивный тестер DLP**.\n"
+            "3. **Шифрование OS Keychain и ZDR**: все ключи шифруются средствами ОС (Windows DPAPI), а заголовок Zero Data Retention запрещает обучение моделей на корпоративных данных."
+        )
+    if any(k in q for k in ("симулятор", "урок", "курс", "учиться", "задани", "решени")):
+        if is_sokrat:
+            return (
+                f"{prefix}\n\n"
+                "Давай разберём твой текущий шаг в **Симуляторе ИИ** методом Сократа:\n"
+                "1. **Какую главную боль бизнеса** мы решаем в этом сценарии и какой артефакт должен получиться на выходе?\n"
+                "2. **Какие ограничения (контекст, формат, проверка фактов, 152-ФЗ)** нужно явно задать агенту, чтобы он не додумал лишнего?\n"
+                "3. Попробуй сформулировать промпт из 3 частей: *Роль и цель → Входные данные и ограничения → Формат результата*, а я помогу усилить каждый пункт!"
+            )
+        return (
+            f"{prefix}\n\n"
+            "В **Симуляторе ИИ** (`/nomad-simulator`) ты учишься на реальных кейсах без страха что-то сломать:\n"
+            "1. Выбери роль (Разработчик, Продакт, Аналитик или Руководитель) и открой текущий урок.\n"
+            "2. Прочитай вводную ситуацию и выбери стратегию или напиши свой промпт в поле ответа.\n"
+            "3. Если встретишь незнакомый термин — наведи курсор на значок **`?`** рядом с опцией или спроси меня прямо здесь!"
+        )
+    return (
+        f"{prefix}\n\n"
+        f"Я рядом и вижу контекст экрана (`{screen_context or 'Nomad Desktop'}`). Чем помочь прямо сейчас?\n"
+        "- **«Объясни этот экран»** — разберу каждую кнопку и настройку простыми словами без сложного жаргона;\n"
+        "- **«Подключить модели и системы РФ»** — проведу за руку по настройке GigaChat, YandexGPT, МТС AI, 1С, Битрикс24 и ЭДО;\n"
+        "- **«Настроить безопасность 152-ФЗ»** — покажу, как включить DLP-маскирование ПДн и гардрейлы для ИБ;\n"
+        "- **«Помощь по Симулятору»** — разберём учебный кейс вместе с Сократом."
+    )
+
+
+@router.post("/buddy/ask")
+def ask_nomad_buddy(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Интерактивный ИИ-бадди (Ника / Сократ) внутри приложения для обучения и снятия техбарьеров."""
+    body = payload or {}
+    persona_id = str(body.get("persona") or "nika").strip().lower()
+    if persona_id not in BUDDY_PERSONAS:
+        persona_id = "nika"
+    persona = BUDDY_PERSONAS[persona_id]
+    question = str(body.get("question") or body.get("prompt") or "").strip()
+    screen_context = str(body.get("context") or body.get("route") or body.get("page") or "").strip()
+    if not question:
+        question = "Объясни этот экран простыми словами и подскажи, с чего начать."
+
+    # Маршрутизация через подписку NomadNet CP -> модель профиля -> ключи окружения -> заготовка
+    root = _ensure_root_pkg()
+    adapter = _load_screen(root, "core_adapter")
+    activation_mod = _load_screen(root, "activation")
+    buddy_llm = _load_screen(root, "buddy_llm")
+    full_prompt = (
+        f"Контекст экрана пользователя в приложении Nomad: {screen_context or 'главный экран'}.\n"
+        f"Вопрос пользователя: {question}"
+    )
+
+    route = buddy_llm.resolve_route(adapter, activation_mod)
+    if route is not None:
+        llm_res = buddy_llm.ask(route, persona["system"], full_prompt)
+        if llm_res.get("ok") and llm_res.get("answer"):
+            return {
+                "ok": True,
+                "persona": persona_id,
+                "persona_name": persona["name"],
+                "persona_role": persona["role"],
+                "source": "live_llm",
+                "provider": route.get("provider"),
+                "model": route.get("model"),
+                "billing": route.get("billing"),
+                "answer": str(llm_res["answer"]).strip(),
+            }
+        block = llm_res.get("billing_block")
+        if isinstance(block, dict):
+            topup_url = block.get("topup_url")
+            msg = str(block.get("message") or "Баланс NomadNet исчерпан. Пополните баланс в личном кабинете.").strip()
+            answer_text = f"{msg}\nПополнить баланс: {topup_url}" if topup_url else msg
+            return {
+                "ok": True,
+                "persona": persona_id,
+                "persona_name": persona["name"],
+                "persona_role": persona["role"],
+                "source": "billing_block",
+                "status_code": 402,
+                "billing_block": block,
+                "answer": answer_text,
+            }
+
+    return {
+        "ok": True,
+        "persona": persona_id,
+        "persona_name": persona["name"],
+        "persona_role": persona["role"],
+        "source": "academy_mentor",
+        "answer": _build_local_buddy_answer(persona_id, question, screen_context),
     }
 
 

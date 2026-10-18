@@ -198,8 +198,8 @@ export function FallbackTab({ ctx }) {
                   gap: '10px',
                   padding: '10px 12px',
                   borderRadius: '8px',
-                  border: active ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                  background: active ? '#eff6ff' : '#f8fafc',
+                  border: active ? '2px solid #18181B' : '1px solid #cbd5e1',
+                  background: active ? '#F4F4F5' : '#f8fafc',
                   cursor: saving ? 'not-allowed' : 'pointer',
                 }}
               >
@@ -406,8 +406,8 @@ export function FallbackTab({ ctx }) {
             style={{
               padding: '8px 14px',
               borderRadius: '6px',
-              border: '1px solid #1d4ed8',
-              background: restricted ? '#94a3b8' : '#2563eb',
+              border: '1px solid #18181B',
+              background: restricted ? '#94a3b8' : '#18181B',
               color: '#ffffff',
               fontWeight: 600,
               cursor: restricted ? 'not-allowed' : 'pointer',
@@ -416,6 +416,65 @@ export function FallbackTab({ ctx }) {
             Добавить в запас
           </button>
         </form>
+      </section>
+
+      <section
+        data-testid="nomad-harness-role-modes-card"
+        style={{
+          padding: '16px',
+          borderRadius: '10px',
+          border: '1px solid #e2e8f0',
+          background: '#ffffff',
+          display: 'grid',
+          gap: '12px',
+        }}
+      >
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0, fontSize: '16px' }}>Ролевые режимы агента и гибридный каскад (NemoClaw / Roo Code)</h3>
+            <span
+              style={{
+                padding: '2px 8px',
+                borderRadius: '999px',
+                fontSize: '11px',
+                fontWeight: 600,
+                background: '#F4F4F5',
+                color: '#18181B',
+              }}
+            >
+              Architect · Code · Debug · Orchestrator
+            </span>
+          </div>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#475569' }}>
+            Автоматическое распределение моделей по роли шага: архитектура и планирование идут на флагманы рассуждений, массовый кодинг — на быстрые кодовые модели, а локальная классификация и фильтрация ПДн — на локальный контур NIM / vLLM / Ollama.
+          </p>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '8px' }}>
+          {[
+            { role: 'Архитектор (Architect)', model: 'claude-opus-5-5 / gpt-6-astra', desc: 'Проектирование, ТЗ, декомпозиция и ревью безопасности (Read-Only + План)' },
+            { role: 'Инженер кода (Code)', model: 'gpt-6.1-sol / kimi-k2.7-code', desc: 'Написание и рефакторинг кода, автозапуск тестов и линтеров' },
+            { role: 'Отладка (Debug)', model: 'claude-sonnet-5-5 / deepseek-v4-pro', desc: 'Анализ стектрейсов, воспроизведение багов и точечные фиксы' },
+            { role: 'Оркестратор роя (Swarm)', model: 'jev-1.13.0 + пул воркеров', desc: 'Параллельный запуск субагентов в изолированных Git Worktree ветках' },
+          ].map((item) => (
+            <div
+              key={item.role}
+              style={{
+                padding: '10px 12px',
+                borderRadius: '9px',
+                border: '1px solid #cbd5e1',
+                background: '#f8fafc',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a' }}>{item.role}</div>
+              <code style={{ fontSize: '11.5px', color: '#18181B', fontWeight: 600 }}>{item.model}</code>
+              <div style={{ fontSize: '11.5px', color: '#475569', lineHeight: 1.4 }}>{item.desc}</div>
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );

@@ -1,0 +1,7 @@
+{
+  "id": "terminal",
+  "displayName": "Терминал CRT 🖥️",
+  "description": "Ретро-монитор с зелёным курсором.",
+  "spritesheetPath": "spritesheet.webp",
+  "createdBy": "generator"
+}

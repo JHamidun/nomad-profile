@@ -40,13 +40,14 @@ def register(ctx) -> None:
     selfcheck.on_start()
     # Импорт внутри register: пакет импортируют и без ctx (хук шлюза берёт отсюда только
     # conductor), и тянуть туда инструменты и argparse-дерево незачем.
-    from . import billing, guard, k6, meter, no_nous, skill_finder, spotlight, tools, untrusted, verification, whitelabel
+    from . import billing, guard, k6, meter, no_nous, skill_finder, spotlight, thinking_policy, tools, untrusted, verification, whitelabel
 
     no_nous.install_no_nous_guard()
     whitelabel.patch_loaded_attribution_headers()
     guard.register_policy_callback(untrusted.on_pre_tool_call)
     verification.register_auxiliary_task(ctx)
     k6.register(ctx)
+    thinking_policy.register(ctx)
 
     ctx.register_tool(name="swarm_start", toolset=TOOLSET, schema=tools.SWARM_START,
                       handler=tools.swarm_start, description="Create a Nomad swarm", emoji="🐝")

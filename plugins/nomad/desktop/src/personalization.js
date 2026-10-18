@@ -311,7 +311,7 @@ export function PersonalizationTab({ ctx, onSaved = null }) {
               padding: '9px 20px',
               borderRadius: '8px',
               border: 'none',
-              background: 'var(--primary, #2563eb)',
+              background: 'var(--primary, #18181B)',
               color: '#ffffff',
               fontSize: '13px',
               fontWeight: 600,

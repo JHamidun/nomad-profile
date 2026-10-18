@@ -204,6 +204,14 @@ def extract_usage_record(data: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     ) or None
     lane = _first_str(data.get("lane"), os.environ.get("NOMAD_LANE")) or None
     billing = _first_str(data.get("billing"), os.environ.get("NOMAD_BILLING")) or None
+    if not billing:
+        try:
+            from . import billing as billing_mod
+
+            if billing_mod._is_nomadnet_provider(provider, model):
+                billing = "nomadnet"
+        except Exception:
+            pass
     session_id = _first_str(data.get("session_id")) or None
     turn_id = _first_str(data.get("turn_id")) or None
     created_at = _first_str(data.get("created_at"), data.get("ts")) or None

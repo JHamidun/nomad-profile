@@ -205,7 +205,27 @@ def stop_swarm(
 
     # 1. Active worker processes for this swarm
     active_procs = db.list_worker_processes(conn, status="running")
-    swarm_procs = [p for p in active_procs if p.get("swarm_id") == target_id]
+    swarm_task_ids: set[str] = set()
+    try:
+        rows = conn.execute("SELECT task_id FROM task_depth WHERE swarm_id = ?", (target_id,)).fetchall()
+        swarm_task_ids.update(r[0] for r in rows if r and r[0])
+    except Exception:
+        pass
+    try:
+        evs = db.list_events(conn, swarm_id=target_id)
+        for ev in evs:
+            if ev.get("kind") == "worker_launched":
+                d = ev.get("detail")
+                if isinstance(d, dict) and d.get("task_id"):
+                    swarm_task_ids.add(str(d["task_id"]).strip())
+    except Exception:
+        pass
+
+    swarm_procs = [
+        p for p in active_procs
+        if p.get("swarm_id") == target_id
+        or (p.get("task_id") and str(p["task_id"]).strip() in swarm_task_ids)
+    ]
 
     # 2. Write stop markers and terminate each process
     for p in swarm_procs:

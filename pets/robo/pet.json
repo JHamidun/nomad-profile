@@ -1,0 +1,7 @@
+{
+  "id": "robo",
+  "displayName": "Робот 🤖",
+  "description": "Винтажный жестяной робот-помощник.",
+  "spritesheetPath": "spritesheet.webp",
+  "createdBy": "generator"
+}

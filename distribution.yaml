@@ -41,6 +41,7 @@ distribution_owned:
   - plugins
   - desktop-plugins
   - skins
+  - pets
   - dashboard-themes
   # Шлюзовые хуки (<home>/hooks/<имя>/HOOK.yaml + handler.py). hooks/nomad-loop стартует цикл
   # дирижёра на gateway:startup. В DEFAULT_DIST_OWNED их нет — без этой строки хук не приедет,

@@ -9,6 +9,7 @@ import {
   SIDEBAR_NAV_AREA,
 } from '@hermes/plugin-sdk';
 import { createElement, useCallback, useEffect, useState } from 'react';
+import { NomadMemoryProjectsView } from './council-memory-cloud.js';
 
 export const DATA_ROUTE_PATH = '/nomad-data';
 export const DATA_NAV_ID = 'data';
@@ -291,6 +292,7 @@ export function NomadDataPage({ ctx }) {
       });
   }, [ctx, restoreZipPath, restoreToken, loadData]);
 
+  const [dataViewMode, setDataViewMode] = useState('all');
   const projects = Array.isArray(state.checkpoints?.projects) ? state.checkpoints.projects : [];
   const cliCommandText = buildRestoreCliCommand(restoreZipPath);
 
@@ -298,20 +300,69 @@ export function NomadDataPage({ ctx }) {
     'div',
     {
       className: 'nomad-data-page',
-      style: { padding: '24px', maxWidth: '1080px', margin: '0 auto' },
+      style: { padding: '28px 34px 44px', maxWidth: '1140px', margin: '0 auto' },
     },
     h(
       'header',
-      { style: { marginBottom: '20px' } },
+      {
+        style: {
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: '14px',
+          flexWrap: 'wrap',
+        },
+      },
       h(
-        'h1',
-        { style: { fontSize: '22px', fontWeight: 600, margin: '0 0 6px 0' } },
-        'Данные и место',
+        'div',
+        null,
+        h(
+          'h1',
+          { style: { fontSize: '24px', fontWeight: 700, margin: '0 0 6px 0', letterSpacing: '-0.022em' } },
+          'Данные и место · Память и Проекты',
+        ),
+        h(
+          'p',
+          { style: { margin: 0, opacity: 0.76, fontSize: '13.5px', maxWidth: '720px', lineHeight: 1.5 } },
+          'Трёхслойная память (Базовая память Hermes + Векторный индекс + Граф знаний), проекты и субагенты с векторизацией документов (codeg), снимки откатов и резервные архивы.',
+        ),
       ),
       h(
-        'p',
-        { style: { margin: 0, opacity: 0.78, fontSize: '13px' } },
-        'Объём данных профиля на диске, управление снимками откатов, резервное копирование и сброс личной памяти.',
+        'div',
+        { className: 'nomad-seg-group' },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'nomad-seg-btn',
+            'data-active': dataViewMode === 'all' ? 'true' : 'false',
+            onClick: () => setDataViewMode('all'),
+          },
+          'Все разделы',
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            'data-testid': 'data-tab-memory-projects',
+            className: 'nomad-seg-btn',
+            'data-active': dataViewMode === 'memory' ? 'true' : 'false',
+            onClick: () => setDataViewMode('memory'),
+          },
+          'Память (3 слоя) и Проекты',
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            'data-testid': 'data-tab-storage',
+            className: 'nomad-seg-btn',
+            'data-active': dataViewMode === 'storage' ? 'true' : 'false',
+            onClick: () => setDataViewMode('storage'),
+          },
+          'Хранилище и Архивы',
+        ),
       ),
     ),
     state.error
@@ -321,13 +372,20 @@ export function NomadDataPage({ ctx }) {
             role: 'alert',
             style: {
               padding: '12px 14px',
-              borderRadius: '8px',
+              borderRadius: '10px',
               marginBottom: '16px',
               background: 'rgba(248,81,73,0.14)',
               border: '1px solid rgba(248,81,73,0.4)',
             },
           },
           state.error,
+        )
+      : null,
+    dataViewMode !== 'storage'
+      ? h(
+          'div',
+          { style: { marginBottom: '22px' } },
+          h(NomadMemoryProjectsView, { ctx, compact: true }),
         )
       : null,
     h(

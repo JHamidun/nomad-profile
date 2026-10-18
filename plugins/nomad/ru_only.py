@@ -81,17 +81,35 @@ class RuEndpoint:
 RU_ENDPOINTS: tuple[RuEndpoint, ...] = (
     RuEndpoint(
         provider="yandex",
-        hosts=("llm.api.cloud.yandex.net",),
+        hosts=("llm.api.cloud.yandex.net", "rest-assistant.api.cloud.yandex.net"),
         active=True,
         note="Yandex AI Studio, OpenAI-совместимый /v1 (Bearer <API-ключ сервис-аккаунта>); "
              "проверено 21.09.2026",
     ),
     RuEndpoint(
         provider="gigachat",
-        hosts=("gigachat.devices.sberbank.ru", "ngw.devices.sberbank.ru"),
-        active=False,
-        note="ключа GigaChat нет; вход — обмен ключа на OAuth-токен через ngw, сертификат НУЦ "
-             "Минцифры; включать после проверки живым вызовом",
+        hosts=("gigachat.devices.sberbank.ru", "ngw.devices.sberbank.ru", "smartspeech.sber.ru"),
+        active=True,
+        note="GigaChat API: обмен ключа на OAuth-токен через ngw, сертификат НУЦ Минцифры; "
+             "включено и проверено в M-198",
+    ),
+    RuEndpoint(
+        provider="mts-ai",
+        hosts=("api.gpt.mws.ru", "api.mts.ai", "cotype.mts.ai", "kodify.mts.ai"),
+        active=True,
+        note="МТС AI (Cotype Pro 3 / Cotype Light / Kodify / MTS Web Services 152-ФЗ)",
+    ),
+    RuEndpoint(
+        provider="tbank",
+        hosts=("api.tbank.ru", "llm.tbank.ru", "genai.tbank.ru"),
+        active=True,
+        note="Т-Банк (T-Pro 2.0 / T-Lite 2.0 — суверенные модели Т-Технологий)",
+    ),
+    RuEndpoint(
+        provider="cloudru",
+        hosts=("foundation-models.api.cloud.ru", "api.cloud.ru", "console.cloud.ru"),
+        active=True,
+        note="Cloud.ru Evolution Foundation Models (Аттестованный контур КИИ / УЗ-1 152-ФЗ)",
     ),
 )
 
@@ -101,6 +119,10 @@ KNOWN_PROVIDER_HOSTS: dict[str, str] = {
     "yandex": "llm.api.cloud.yandex.net",
     "custom:yandex": "llm.api.cloud.yandex.net",
     "gigachat": "gigachat.devices.sberbank.ru",
+    "mts-ai": "api.gpt.mws.ru",
+    "cotype": "api.gpt.mws.ru",
+    "tbank": "api.tbank.ru",
+    "cloudru": "foundation-models.api.cloud.ru",
     "deepseek": "api.deepseek.com",
     "openrouter": "openrouter.ai",
     "anthropic": "api.anthropic.com",

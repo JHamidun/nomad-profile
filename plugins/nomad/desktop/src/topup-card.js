@@ -5,7 +5,7 @@
 import { PALETTE_AREA, atom, host } from '@hermes/plugin-sdk'
 import { createElement, useCallback, useEffect, useState } from 'react'
 
-export const DEFAULT_TOPUP_URL = 'https://nomadnet.ru/cabinet/billing'
+export const DEFAULT_TOPUP_URL = 'https://app.nomadnet.ai/cabinet/billing'
 export const activeTopupBlockAtom = atom(null)
 
 const h = createElement
@@ -189,7 +189,7 @@ export function TopupCard({ ctx, payload = null, onDismiss = null }) {
               padding: '8px 18px',
               borderRadius: '8px',
               border: 'none',
-              background: 'var(--primary, #2563eb)',
+              background: 'var(--primary, #18181B)',
               color: '#ffffff',
               fontSize: '13px',
               fontWeight: 600,

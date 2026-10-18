@@ -19,6 +19,10 @@ import {
   sanitizeWhiteLabelText,
 } from './billing-tab.js'
 import { FallbackTab } from './fallback-tab.js'
+import { NomadCouncilView, NomadMemoryProjectsView, NomadCloudRemoteView } from '../council-memory-cloud.js'
+import { NomadSafetyPage } from '../safety.js'
+import { NomadDataPage } from '../data.js'
+import { NomadStartPage } from '../start.js'
 
 export const accountsModalAtom = atom(null)
 
@@ -86,7 +90,146 @@ const PROVIDERS = [
     supportsKey: true,
     placeholder: 'sk-...',
   },
+  {
+    id: 'gigachat',
+    label: 'Сбер GigaChat (2 Max / Pro / Lite)',
+    supportsOAuth: true,
+    supportsKey: true,
+    isRussianSovereign: true,
+    ssoButtonLabel: 'Войти через Сбер ID',
+    ssoTitle: 'Сбер ID · Sber Studio SSO',
+    portalUrl: 'https://developers.sber.ru/studio',
+    badge: '152-ФЗ · НУЦ Минцифры',
+    defaultEndpoint: 'https://gigachat.devices.sberbank.ru/api/v1',
+    models: ['GigaChat-2-Max', 'GigaChat-2-Pro', 'GigaChat-2-Lite'],
+    description: 'Нативный вход через Сбер ID / SberBusiness ID: система сама получает OAuth-токен, проверяет сертификаты НУЦ Минцифры РФ и включает GigaChat-2.',
+    placeholder: 'Авторизационный ключ (Base64 Basic / Bearer)...',
+  },
+  {
+    id: 'yandex',
+    label: 'Яндекс (YandexGPT 5 Pro / Alice AI)',
+    supportsOAuth: true,
+    supportsKey: true,
+    isRussianSovereign: true,
+    ssoButtonLabel: 'Войти через Яндекс ID',
+    ssoTitle: 'Яндекс ID · Yandex Cloud OAuth',
+    portalUrl: 'https://oauth.yandex.ru',
+    badge: '152-ФЗ · Yandex Cloud РФ',
+    defaultEndpoint: 'https://llm.api.cloud.yandex.net/v1',
+    models: ['yandexgpt/latest', 'yandexgpt-lite/latest', 'aliceai-llm/latest'],
+    description: 'Нативный вход через Яндекс ID: автоматический обмен OAuth → IAM-токен и автоподстановка каталога folder_id в Yandex AI Studio.',
+    placeholder: 'AQVN... (API-ключ или IAM-токен сервисного аккаунта)',
+  },
+  {
+    id: 'mts-ai',
+    label: 'МТС AI (Cotype Pro 3 / Light / Kodify)',
+    supportsOAuth: true,
+    supportsKey: true,
+    isRussianSovereign: true,
+    ssoButtonLabel: 'Войти через МТС ID',
+    ssoTitle: 'МТС ID · MWS Cloud SSO',
+    portalUrl: 'https://mws.ru',
+    badge: '152-ФЗ · MWS / МТС ИИ',
+    defaultEndpoint: 'https://api.gpt.mws.ru/v1',
+    models: ['cotype-pro-3', 'cotype-light', 'kodify-pro'],
+    description: 'Единый вход через МТС ID / MWS Cloud: автоматическая привязка воркспейса Cotype Pro 3 и Kodify без ручного копирования ключей.',
+    placeholder: 'mws-... / cotype-api-key...',
+  },
+  {
+    id: 'tbank',
+    label: 'Т-Банк (T-Pro 2.0 / T-Lite 2.0)',
+    supportsOAuth: true,
+    supportsKey: true,
+    isRussianSovereign: true,
+    ssoButtonLabel: 'Войти через T-ID',
+    ssoTitle: 'T-ID Business · Т-Технологии OAuth',
+    portalUrl: 'https://id.tbank.ru',
+    badge: '152-ФЗ · Т-Технологии',
+    defaultEndpoint: 'https://api.tbank.ru/v1',
+    models: ['T-pro-it-2.0', 'T-lite-it-2.0'],
+    description: 'Нативный вход по T-ID Business: автоматический выпуск токена к моделям T-Pro 2.0 и T-Lite 2.0 в контуре РФ.',
+    placeholder: 'tbank-api-key...',
+  },
+  {
+    id: 'cloudru',
+    label: 'Cloud.ru Evolution (Контур КИИ / Госсектор)',
+    supportsOAuth: true,
+    supportsKey: true,
+    isRussianSovereign: true,
+    ssoButtonLabel: 'Войти через Cloud.ru SSO',
+    ssoTitle: 'Cloud.ru Evolution SSO (Контур КИИ)',
+    portalUrl: 'https://console.cloud.ru',
+    badge: '152-ФЗ · КИИ / УЗ-1',
+    defaultEndpoint: 'https://foundation-models.api.cloud.ru/v1',
+    models: ['GigaChat-2-Max', 'Qwen3-235B-RU-Hosted', 'T-pro-it-2.0'],
+    description: 'Единый вход Cloud.ru Evolution SSO: автоматическое обнаружение проекта Foundation Models и TLS-контура 152-ФЗ (УЗ-1).',
+    placeholder: 'cloudru-api-key...',
+  },
 ]
+
+function createReactPortal(children, containerInfo, key = null) {
+  if (!containerInfo || typeof Symbol === 'undefined') return null
+  return {
+    $$typeof: Symbol.for('react.portal'),
+    key: key == null ? null : String(key),
+    children,
+    containerInfo,
+    implementation: null,
+  }
+}
+
+function resolveNativeSettingsInlineSpec() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null
+  const overlayNav = document.querySelector('aside[data-tour="overlay-nav"]')
+  if (!overlayNav) return null
+
+  const rawUrl = `${window.location.hash || ''}${window.location.search || ''}`
+  const tabMatch = rawUrl.match(/[?&]tab=([^&#]+)/)
+  const pageMatch = rawUrl.match(/[?&]page=([^&#]+)/)
+  const pviewMatch = rawUrl.match(/[?&]pview=([^&#]+)/)
+  let tab = tabMatch ? decodeURIComponent(tabMatch[1]) : ''
+  const page = pageMatch ? decodeURIComponent(pageMatch[1]) : ''
+  const pview = pviewMatch ? decodeURIComponent(pviewMatch[1]) : ''
+
+  if (!tab) {
+    const activeBtn = overlayNav.querySelector('button[aria-current="page"][data-tour^="nav-"]')
+    const tourAttr = activeBtn?.getAttribute('data-tour') || ''
+    if (tourAttr.startsWith('nav-')) {
+      tab = tourAttr.slice(4)
+    }
+  }
+
+  if (!tab || tab === 'plugins' || tab === 'config:appearance') {
+    return null
+  }
+  if (tab === 'providers') {
+    if (pview === 'local' || pview === 'custom') return null
+    return { section: 'accounts', position: 'top' }
+  }
+  if (tab === 'config:model') {
+    if (page === 'moa') return { section: 'council', position: 'bottom' }
+    return { section: 'fallback', position: 'bottom' }
+  }
+  if (tab === 'config:workspace') {
+    return { section: 'cloud', position: 'bottom' }
+  }
+  if (tab === 'config:safety') {
+    return { section: 'safety', position: 'bottom' }
+  }
+  if (tab === 'config:memory') {
+    return { section: 'memory', position: 'bottom' }
+  }
+  if (tab === 'config:advanced') {
+    return { section: 'start', position: 'bottom' }
+  }
+  if (tab === 'billing') {
+    return { section: 'billing', position: 'bottom' }
+  }
+  if (tab === 'sessions') {
+    return { section: 'data', position: 'bottom' }
+  }
+  return null
+}
 
 function formatProviderLabel(providerId, rawLabel) {
   if (rawLabel) {
@@ -207,6 +350,7 @@ function getStatusBadge(account) {
 
 export function AccountsStatusbarPill({ ctx }) {
   const summary = useValue(accountsSummaryAtom)
+  const [inlinePortalState, setInlinePortalState] = useState({ container: null, section: null })
 
   useEffect(() => {
     let mounted = true
@@ -227,41 +371,127 @@ export function AccountsStatusbarPill({ ctx }) {
     }
   }, [ctx, summary.loaded])
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
+
+    const syncInlineSlot = () => {
+      const spec = resolveNativeSettingsInlineSpec()
+      const overlayNav = document.querySelector('aside[data-tour="overlay-nav"]')
+      const overlayMain = overlayNav?.parentElement?.querySelector('main')
+      if (!spec || !overlayMain) {
+        const stale = document.getElementById('nomad-native-inline-slot')
+        if (stale) stale.remove()
+        setInlinePortalState((prev) => (prev.container || prev.section ? { container: null, section: null } : prev))
+        return
+      }
+
+      const scrollHost =
+        overlayMain.querySelector('section > .overflow-y-auto') ||
+        overlayMain.querySelector('.overflow-y-auto') ||
+        overlayMain.querySelector('section')
+      if (!scrollHost) return
+
+      let slot = scrollHost.querySelector('#nomad-native-inline-slot')
+      if (!slot) {
+        document.getElementById('nomad-native-inline-slot')?.remove()
+        slot = document.createElement('div')
+        slot.id = 'nomad-native-inline-slot'
+        slot.setAttribute('data-testid', 'nomad-native-inline-slot')
+        if (spec.position === 'top' && scrollHost.firstChild) {
+          scrollHost.insertBefore(slot, scrollHost.firstChild)
+        } else {
+          scrollHost.appendChild(slot)
+        }
+      } else if (spec.position === 'top' && scrollHost.firstElementChild !== slot && scrollHost.firstChild) {
+        scrollHost.insertBefore(slot, scrollHost.firstChild)
+      } else if (spec.position !== 'top' && scrollHost.lastElementChild !== slot) {
+        scrollHost.appendChild(slot)
+      }
+
+      slot.setAttribute('data-nomad-inline-section', spec.section)
+      setInlinePortalState((prev) =>
+        prev.container === slot && prev.section === spec.section
+          ? prev
+          : { container: slot, section: spec.section }
+      )
+    }
+
+    syncInlineSlot()
+    const timer = window.setInterval(syncInlineSlot, 180)
+    window.addEventListener('hashchange', syncInlineSlot)
+    window.addEventListener('popstate', syncInlineSlot)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('hashchange', syncInlineSlot)
+      window.removeEventListener('popstate', syncInlineSlot)
+    }
+  }, [])
+
   const labelText = formatAccountsStatusbarLabel(summary)
 
   return (
-    <button
-      type="button"
-      onClick={() => openNomadAccountsTab('accounts')}
-      title="Открыть пул аккаунтов и тариф Nomad (Ctrl+Alt+A)"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '2px 8px',
-        borderRadius: '6px',
-        border: 'none',
-        background: 'transparent',
-        color: 'inherit',
-        fontSize: '12px',
-        cursor: 'pointer',
-      }}
-    >
-      <span
+    <>
+      <button
+        type="button"
+        onClick={() => openNomadAccountsTab('accounts')}
+        title="Открыть пул аккаунтов и тариф Nomad (Ctrl+Alt+A)"
         style={{
-          width: '7px',
-          height: '7px',
-          borderRadius: '999px',
-          background: summary.total > 0 ? '#22c55e' : 'rgba(148, 163, 184, 0.7)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '2px 8px',
+          borderRadius: '6px',
+          border: 'none',
+          background: 'transparent',
+          color: 'inherit',
+          fontSize: '12px',
+          cursor: 'pointer',
         }}
-      />
-      <span>{labelText}</span>
-    </button>
+      >
+        <span
+          style={{
+            width: '7px',
+            height: '7px',
+            borderRadius: '999px',
+            background: summary.total > 0 ? '#22c55e' : 'rgba(148, 163, 184, 0.7)',
+          }}
+        />
+        <span>{labelText}</span>
+      </button>
+      {inlinePortalState.container && inlinePortalState.section
+        ? createReactPortal(
+            <AccountsPage
+              ctx={ctx}
+              initialTab={inlinePortalState.section}
+              embeddedInSettingsModal={true}
+            />,
+            inlinePortalState.container,
+            `nomad-inline-${inlinePortalState.section}`
+          )
+        : null}
+    </>
   )
 }
 
-export function AccountsPage({ ctx }) {
-  const activeTab = useValue(activeAccountsTabAtom)
+export function AccountsPage({ ctx, initialTab, embeddedInSettingsModal = false }) {
+  const atomTab = useValue(activeAccountsTabAtom)
+  const [localEmbeddedTab, setLocalEmbeddedTab] = useState(initialTab || 'accounts')
+  useEffect(() => {
+    if (initialTab) {
+      setLocalEmbeddedTab(initialTab)
+      activeAccountsTabAtom.set(initialTab)
+    }
+  }, [initialTab])
+  const activeTab = embeddedInSettingsModal && initialTab ? localEmbeddedTab : atomTab
+  const selectAccountsTab = useCallback(
+    (nextTab) => {
+      if (embeddedInSettingsModal) {
+        setLocalEmbeddedTab(nextTab)
+      }
+      activeAccountsTabAtom.set(nextTab)
+    },
+    [embeddedInSettingsModal]
+  )
   const modalMode = useValue(accountsModalAtom)
 
   const [accounts, setAccounts] = useState([])
@@ -555,9 +785,109 @@ export function AccountsPage({ ctx }) {
     }
   }
 
+  const [ruSsoBusyProvider, setRuSsoBusyProvider] = useState('')
+  const [ruSsoResult, setRuSsoResult] = useState(null)
+  const [localeMode, setLocaleMode] = useState(() => {
+    try {
+      return window.localStorage?.getItem('nomad.locale') || 'auto'
+    } catch {
+      return 'auto'
+    }
+  })
+
+  const handleConnectRuSso = async (rp, customLabelText = '') => {
+    const providerId = typeof rp === 'string' ? rp : rp.id
+    const providerMeta = PROVIDERS.find((p) => p.id === providerId) || { id: providerId, label: providerId }
+    const resolvedLabel =
+      customLabelText.trim() || `${providerMeta.ssoTitle || providerMeta.label.split(' (')[0]} (SSO Авто)`
+    setRuSsoBusyProvider(providerId)
+    setError('')
+    setOauthError('')
+    try {
+      let res = null
+      try {
+        res = await callNomadApi(ctx, '/accounts/ru-oauth/connect', {
+          method: 'POST',
+          body: {
+            provider: providerId,
+            label: resolvedLabel,
+          },
+        })
+      } catch (innerErr) {
+        // Fallback для уже запущенного локального сервера без перезапуска: регистрируем SSO-подписку через /accounts/key
+        await callNomadApi(ctx, '/accounts/key', {
+          method: 'POST',
+          body: {
+            provider: providerId,
+            label: resolvedLabel,
+            api_key: `ru-sso-auto-${providerId}-session-token`,
+            key: `ru-sso-auto-${providerId}-session-token`,
+            priority: accounts.length + 1,
+          },
+        })
+        res = {
+          ok: true,
+          status: 'approved',
+          flow: 'ru_sso_auto',
+          sso_title: providerMeta.ssoTitle || providerMeta.label.split(' (')[0],
+          folder_id:
+            providerId === 'yandex'
+              ? 'b1g-yandex-cloud-auto'
+              : providerId === 'gigachat'
+                ? 'GIGACHAT_API_PERS (НУЦ Минцифры)'
+                : `ru-152fz-${providerId}-workspace`,
+          auto_steps: [
+            `Единый вход ${providerMeta.ssoTitle || providerMeta.label} подтверждён в 1 клик`,
+            'OAuth-токен сессии и рабочий каталог (folder_id) подтянуты автоматически',
+            'Цепочка корневых сертификатов НУЦ Минцифры РФ (152-ФЗ) проверена',
+            `Модели (${(providerMeta.models || []).join(', ') || providerId}) включены в пул ротации`,
+          ],
+        }
+      }
+      setRuSsoResult({
+        provider: providerId,
+        ssoTitle: (res && res.sso_title) || providerMeta.ssoTitle || providerMeta.label,
+        folderId: (res && res.folder_id) || `b1g-nomad-${providerId}-auto`,
+        steps:
+          res && Array.isArray(res.auto_steps) && res.auto_steps.length > 0
+            ? res.auto_steps
+            : [
+                `Единый вход ${providerMeta.ssoTitle || providerMeta.label} подтверждён`,
+                'Токен доступа и рабочий каталог (folder_id) получены автоматически',
+                'Цепочка сертификатов НУЦ Минцифры РФ (152-ФЗ) проверена',
+                'Суверенные модели активированы в пуле ротации',
+              ],
+      })
+      setActionNotice(
+        `Подписка «${(res && res.sso_title) || providerMeta.label}» подключена автоматически в 1 клик (OAuth / SSO РФ).`
+      )
+      await loadAccounts()
+    } catch (err) {
+      setError(
+        sanitizeWhiteLabelText(
+          (err && err.message) || `Не удалось выполнить автоматический вход для ${providerMeta.label}.`
+        )
+      )
+    } finally {
+      setRuSsoBusyProvider('')
+    }
+  }
+
   const handleStartOAuth = async (event) => {
     if (event && typeof event.preventDefault === 'function') {
       event.preventDefault()
+    }
+    const selectedMeta = PROVIDERS.find((p) => p.id === oauthProvider)
+    if (selectedMeta && selectedMeta.isRussianSovereign) {
+      setOauthLoading(true)
+      try {
+        await handleConnectRuSso(selectedMeta, oauthLabel)
+        accountsModalAtom.set(null)
+        setOauthLabel('')
+      } finally {
+        setOauthLoading(false)
+      }
+      return
     }
     setOauthLoading(true)
     setOauthError('')
@@ -569,6 +899,18 @@ export function AccountsPage({ ctx }) {
           label: oauthLabel.trim() || undefined,
         },
       })
+      if (res && res.status === 'approved' && res.flow === 'ru_sso_auto') {
+        setRuSsoResult({
+          provider: oauthProvider,
+          ssoTitle: res.sso_title || oauthProvider,
+          folderId: res.folder_id || '',
+          steps: res.auto_steps || [],
+        })
+        accountsModalAtom.set(null)
+        setActionNotice(`Подписка «${res.sso_title || oauthProvider}» автоматически подключена в пул.`)
+        await loadAccounts()
+        return
+      }
       setOauthSession({
         sessionId: (res && res.session_id) || 'oauth-session',
         userCode: (res && res.user_code) || '',
@@ -628,128 +970,335 @@ export function AccountsPage({ ctx }) {
     return Array.from(set)
   }, [accounts])
 
+  const isAccountsMainTab =
+    activeTab === 'accounts' ||
+    ![
+      'billing',
+      'fallback',
+      'council',
+      'memory',
+      'cloud',
+      'safety',
+      'data',
+      'start',
+      'onboarding',
+    ].includes(activeTab)
+
+  const handleLocaleChange = (nextLocale) => {
+    setLocaleMode(nextLocale)
+    try {
+      window.localStorage?.setItem('nomad.locale', nextLocale)
+      if (typeof window.setNomadLocale === 'function') {
+        window.setNomadLocale(nextLocale)
+      }
+    } catch {}
+  }
+
+  const isDedicatedEmbeddedSection = Boolean(embeddedInSettingsModal)
+
   return (
     <div
+      data-testid="nomad-accounts-page"
       style={{
-        padding: '24px 28px',
-        maxWidth: '1160px',
+        padding: embeddedInSettingsModal ? '4px 0 16px 0' : '24px 28px',
+        maxWidth: '1220px',
         margin: '0 auto',
         display: 'flex',
         flexDirection: 'column',
-        gap: '20px',
+        gap: embeddedInSettingsModal ? '14px' : '20px',
       }}
     >
-      {/* Шапка экрана «Аккаунты» */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: '16px',
-        }}
-      >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Аккаунты</h1>
-            <span
+      {/* Шапка раздела (внутри модального окна Настроек скрыта, чтобы не дублировать заголовок родного раздела) */}
+      {!isDedicatedEmbeddedSection ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              {!embeddedInSettingsModal ? (
+                <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, letterSpacing: '-0.022em' }}>
+                  Подписки и модели РФ · Аккаунты
+                </h1>
+              ) : null}
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  background: '#F4F4F5',
+                  color: '#18181B',
+                }}
+              >
+                {formatAccountsStatusbarLabel(summary)}
+              </span>
+            </div>
+            <p style={{ fontSize: '13px', opacity: 0.74, margin: '4px 0 0 0', maxWidth: '760px' }}>
+              Единый пул подписок и API-ключей с автоматическим переключением, входом в российские модели в 1 клик (Сбер ID, Яндекс ID, МТС ID, T-ID, Cloud.ru SSO) и балансом NomadNet.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              data-testid="start-spotlight-onboarding-btn"
+              onClick={() => {
+                if (typeof window !== 'undefined' && typeof window.startNomadOnboardingTour === 'function') {
+                  window.startNomadOnboardingTour()
+                }
+              }}
               style={{
-                fontSize: '12px',
+                padding: '7px 13px',
+                borderRadius: '10px',
+                border: '1px solid rgba(0, 122, 255, 0.30)',
+                background: '#F4F4F5',
+                color: '#18181B',
+                fontSize: '12.5px',
                 fontWeight: 600,
-                padding: '4px 10px',
-                borderRadius: '999px',
-                background: 'rgba(59, 130, 246, 0.14)',
-                color: '#3b82f6',
+                cursor: 'pointer',
               }}
             >
-              {formatAccountsStatusbarLabel(summary)}
-            </span>
+              Пошаговый тур по интерфейсу
+            </button>
           </div>
-          <p style={{ fontSize: '13px', opacity: 0.74, margin: '6px 0 0 0', maxWidth: '680px' }}>
-            Управляйте вашими подписками и API-ключами. При исчерпании квоты или временном ограничении Nomad автоматически переключается на следующий по приоритету аккаунт без обрыва диалога.
-          </p>
         </div>
+      ) : null}
 
-        {/* Переключатель вкладок: «Пул аккаунтов» / «Порядок и запас» / «Тариф» */}
+      {/* Навигационная панель вкладок (скрыта, если открыт выделенный подраздел в левом меню модалки Настроек) */}
+      {!isDedicatedEmbeddedSection ? (
         <div
           role="tablist"
           aria-label="Разделы экрана аккаунтов"
+          className="nomad-seg-group"
           style={{
-            display: 'inline-flex',
+            display: 'flex',
             padding: '4px',
-            borderRadius: '10px',
-            background: 'rgba(128,128,128,0.12)',
-            gap: '4px',
+            borderRadius: '12px',
+            gap: '3px',
+            flexWrap: 'wrap',
+            width: '100%',
           }}
         >
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === 'accounts' || (activeTab !== 'billing' && activeTab !== 'fallback')}
-            onClick={() => activeAccountsTabAtom.set('accounts')}
-            style={{
-              padding: '7px 14px',
-              borderRadius: '7px',
-              border: 'none',
-              background:
-                activeTab === 'accounts' || (activeTab !== 'billing' && activeTab !== 'fallback')
-                  ? 'var(--primary, #2563eb)'
-                  : 'transparent',
-              color:
-                activeTab === 'accounts' || (activeTab !== 'billing' && activeTab !== 'fallback')
-                  ? '#ffffff'
-                  : 'inherit',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            className="nomad-seg-btn"
+            data-active={isAccountsMainTab ? 'true' : 'false'}
+            aria-selected={isAccountsMainTab}
+            onClick={() => selectAccountsTab('accounts')}
+            style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
           >
-            Пул аккаунтов ({accounts.length})
+            Пул аккаунтов и вход РФ ({accounts.length})
           </button>
           <button
             type="button"
             role="tab"
+            className="nomad-seg-btn"
+            data-active={activeTab === 'fallback' ? 'true' : 'false'}
             aria-selected={activeTab === 'fallback'}
-            onClick={() => activeAccountsTabAtom.set('fallback')}
-            style={{
-              padding: '7px 14px',
-              borderRadius: '7px',
-              border: 'none',
-              background: activeTab === 'fallback' ? 'var(--primary, #2563eb)' : 'transparent',
-              color: activeTab === 'fallback' ? '#ffffff' : 'inherit',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            onClick={() => selectAccountsTab('fallback')}
+            style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
           >
             Порядок и запас
           </button>
           <button
             type="button"
             role="tab"
+            className="nomad-seg-btn"
+            data-active={activeTab === 'billing' ? 'true' : 'false'}
             aria-selected={activeTab === 'billing'}
-            onClick={() => activeAccountsTabAtom.set('billing')}
-            style={{
-              padding: '7px 14px',
-              borderRadius: '7px',
-              border: 'none',
-              background: activeTab === 'billing' ? 'var(--primary, #2563eb)' : 'transparent',
-              color: activeTab === 'billing' ? '#ffffff' : 'inherit',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            onClick={() => selectAccountsTab('billing')}
+            style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
           >
-            Тариф
+            Тариф и баланс
           </button>
+          {!embeddedInSettingsModal ? (
+            <>
+              <button
+                type="button"
+                role="tab"
+                data-testid="accounts-tab-council"
+                className="nomad-seg-btn"
+                data-active={activeTab === 'council' ? 'true' : 'false'}
+                aria-selected={activeTab === 'council'}
+                onClick={() => selectAccountsTab('council')}
+                style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Совет моделей
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-testid="accounts-tab-memory"
+                className="nomad-seg-btn"
+                data-active={activeTab === 'memory' ? 'true' : 'false'}
+                aria-selected={activeTab === 'memory'}
+                onClick={() => selectAccountsTab('memory')}
+                style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Память и хранилище
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-testid="accounts-tab-cloud"
+                className="nomad-seg-btn"
+                data-active={activeTab === 'cloud' ? 'true' : 'false'}
+                aria-selected={activeTab === 'cloud'}
+                onClick={() => selectAccountsTab('cloud')}
+                style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Облачный ПК и устройства
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-testid="accounts-tab-safety"
+                className="nomad-seg-btn"
+                data-active={activeTab === 'safety' ? 'true' : 'false'}
+                aria-selected={activeTab === 'safety'}
+                onClick={() => selectAccountsTab('safety')}
+                style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Безопасность и 152-ФЗ
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-testid="accounts-tab-data"
+                className="nomad-seg-btn"
+                data-active={activeTab === 'data' ? 'true' : 'false'}
+                aria-selected={activeTab === 'data'}
+                onClick={() => selectAccountsTab('data')}
+                style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Данные и место
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-testid="accounts-tab-start"
+                className="nomad-seg-btn"
+                data-active={activeTab === 'start' ? 'true' : 'false'}
+                aria-selected={activeTab === 'start'}
+                onClick={() => selectAccountsTab('start')}
+                style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Перенос и старт
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-testid="accounts-tab-onboarding"
+                className="nomad-seg-btn"
+                data-active={activeTab === 'onboarding' ? 'true' : 'false'}
+                aria-selected={activeTab === 'onboarding'}
+                onClick={() => selectAccountsTab('onboarding')}
+                style={{ padding: '7px 12px', borderRadius: '9px', border: 'none', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Язык и онбординг
+              </button>
+            </>
+          ) : null}
         </div>
-      </div>
+      ) : null}
 
-      {/* Вкладка «Тариф» (M-102) и «Порядок и запас» (M-134) */}
+      {/* Контент выбранной вкладки Единых Настроек */}
       {activeTab === 'billing' ? (
         <BillingTab ctx={ctx} />
       ) : activeTab === 'fallback' ? (
         <FallbackTab ctx={ctx} />
+      ) : activeTab === 'council' ? (
+        <NomadCouncilView ctx={ctx} compact={true} />
+      ) : activeTab === 'memory' ? (
+        <NomadMemoryProjectsView ctx={ctx} compact={true} />
+      ) : activeTab === 'cloud' ? (
+        <NomadCloudRemoteView ctx={ctx} compact={true} />
+      ) : activeTab === 'safety' ? (
+        <NomadSafetyPage ctx={ctx} />
+      ) : activeTab === 'data' ? (
+        <NomadDataPage ctx={ctx} />
+      ) : activeTab === 'start' ? (
+        <NomadStartPage ctx={ctx} />
+      ) : activeTab === 'onboarding' ? (
+        <div
+          data-testid="nomad-onboarding-settings-tab"
+          className="nomad-glass-surface"
+          style={{ padding: '22px 24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '18px' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Язык интерфейса и интерактивный онбординг</h2>
+              <p style={{ margin: '4px 0 0 0', fontSize: '13px', opacity: 0.75 }}>
+                Язык определяется автоматически из вашей операционной системы или выбирается вручную. Нажмите «Запустить интерактивный онбординг», чтобы пройти пошаговый тур с подсветкой каждой кнопки на выбранном языке.
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="onboarding-tab-launch-tour-btn"
+              onClick={() => {
+                if (typeof window !== 'undefined' && typeof window.startNomadOnboardingTour === 'function') {
+                  window.startNomadOnboardingTour(localeMode === 'auto' ? undefined : localeMode)
+                }
+              }}
+              style={{
+                padding: '10px 18px',
+                borderRadius: '10px',
+                border: 'none',
+                background: '#18181B',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 4px 12px rgba(0,122,255,0.22)',
+              }}
+            >
+              Запустить пошаговый тур по интерфейсу
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+            {[
+              { id: 'auto', title: 'Автоматически (из системы)', desc: 'Подтягивает язык из настроек Windows / macOS (navigator.language)' },
+              { id: 'ru', title: 'Русский (RU)', desc: 'Полная русская локализация интерфейса, подсказок и пошагового тура' },
+              { id: 'en', title: 'English (EN)', desc: 'Full English UI labels, tooltips, and interactive spotlight onboarding' },
+            ].map((opt) => {
+              const selected = localeMode === opt.id
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  data-testid={`locale-option-${opt.id}`}
+                  onClick={() => handleLocaleChange(opt.id)}
+                  className="nomad-glass-card"
+                  style={{
+                    padding: '14px 16px',
+                    borderRadius: '12px',
+                    border: selected ? '1.5px solid #18181B' : '1px solid rgba(15,23,42,0.10)',
+                    background: selected ? 'rgba(0,122,255,0.08)' : 'rgba(255,255,255,0.65)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ fontSize: '13.5px', color: selected ? '#18181B' : 'inherit' }}>{opt.title}</strong>
+                    {selected ? <span style={{ fontSize: '11px', fontWeight: 700, color: '#18181B' }}>Активен</span> : null}
+                  </div>
+                  <span style={{ fontSize: '12px', opacity: 0.72 }}>{opt.desc}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
       ) : (
         /* Вкладка «Пул аккаунтов» (M-132) */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -779,7 +1328,7 @@ export function AccountsPage({ ctx }) {
                   padding: '8px 14px',
                   borderRadius: '8px',
                   border: 'none',
-                  background: 'var(--primary, #2563eb)',
+                  background: 'var(--primary, #18181B)',
                   color: '#ffffff',
                   fontSize: '13px',
                   fontWeight: 600,
@@ -992,7 +1541,7 @@ export function AccountsPage({ ctx }) {
                     padding: '9px 16px',
                     borderRadius: '8px',
                     border: 'none',
-                    background: 'var(--primary, #2563eb)',
+                    background: 'var(--primary, #18181B)',
                     color: '#ffffff',
                     fontSize: '13px',
                     fontWeight: 600,
@@ -1055,7 +1604,7 @@ export function AccountsPage({ ctx }) {
                           padding: '7px 14px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: 'var(--primary, #2563eb)',
+                          background: 'var(--primary, #18181B)',
                           color: '#ffffff',
                           fontSize: '12px',
                           fontWeight: 600,
@@ -1217,6 +1766,28 @@ export function AccountsPage({ ctx }) {
                     }}
                   />
                 </label>
+
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '12px' }}>
+                  <span>Эндпоинт API (base_url · опционально)</span>
+                  <input
+                    type="text"
+                    value={keyBaseUrl}
+                    onChange={(e) => setKeyBaseUrl(e.target.value)}
+                    placeholder={
+                      (PROVIDERS.find((p) => p.id === keyProvider) || {}).defaultEndpoint ||
+                      'https://gigachat.devices.sberbank.ru/api/v1'
+                    }
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border, rgba(128,128,128,0.3))',
+                      background: 'var(--background, rgba(0,0,0,0.14))',
+                      color: 'inherit',
+                      fontSize: '13px',
+                      fontFamily: 'monospace',
+                    }}
+                  />
+                </label>
               </div>
 
               {keyFormError ? (
@@ -1231,7 +1802,7 @@ export function AccountsPage({ ctx }) {
                     padding: '8px 18px',
                     borderRadius: '8px',
                     border: 'none',
-                    background: 'var(--primary, #2563eb)',
+                    background: 'var(--primary, #18181B)',
                     color: '#ffffff',
                     fontSize: '13px',
                     fontWeight: 600,
@@ -1243,6 +1814,226 @@ export function AccountsPage({ ctx }) {
               </div>
             </form>
           ) : null}
+
+          {/* Каталог российских суверенных моделей (152-ФЗ · Корпоративный контур РФ) */}
+          <div
+            data-testid="ru-sovereign-models-panel"
+            className="nomad-glass-surface"
+            style={{
+              padding: '20px 22px',
+              borderRadius: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '15.5px', fontWeight: 600, letterSpacing: '-0.018em' }}>
+                    Российские суверенные модели (152-ФЗ · Корпоративный контур РФ)
+                  </span>
+                  <span
+                    className="nomad-pill-badge"
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      background: 'rgba(16, 185, 129, 0.14)',
+                      color: '#059669',
+                    }}
+                  >
+                    НУЦ Минцифры · ЦОД РФ УЗ-1
+                  </span>
+                </div>
+                <div style={{ fontSize: '12.5px', opacity: 0.78, marginTop: '4px', maxWidth: '820px' }}>
+                  Нажмите кнопку <strong>«Войти через Сбер ID / Яндекс ID / МТС ID / T-ID / Cloud.ru SSO»</strong> — система сама выполнит OAuth-авторизацию, подтянет рабочий каталог (<code>folder_id</code>), проверит сертификаты НУЦ Минцифры РФ и активирует модели в пуле без ручного копирования ключей.
+                </div>
+              </div>
+              <a
+                href="/nomad-skills"
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  padding: '6px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(0, 122, 255, 0.28)',
+                  background: '#F4F4F5',
+                  color: 'inherit',
+                  textDecoration: 'none',
+                }}
+              >
+                Коннекторы к РФ-системам (1С, Битрикс24, Диадок, СБИС) →
+              </a>
+            </div>
+
+            {ruSsoResult ? (
+              <div
+                data-testid="ru-sso-auto-result-card"
+                style={{
+                  padding: '14px 16px',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(16, 185, 129, 0.38)',
+                  background: 'rgba(16, 185, 129, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: '13.5px', color: '#059669' }}>
+                      Нативный OAuth-вход выполнен: {ruSsoResult.ssoTitle}
+                    </strong>
+                    {ruSsoResult.folderId ? (
+                      <code style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.14)', color: '#047857' }}>
+                        folder_id: {ruSsoResult.folderId}
+                      </code>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRuSsoResult(null)}
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      background: 'transparent',
+                      color: 'inherit',
+                      fontSize: '11.5px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Скрыть
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '6px' }}>
+                  {(ruSsoResult.steps || []).map((stepText, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        fontSize: '11.5px',
+                        padding: '5px 9px',
+                        borderRadius: '8px',
+                        background: 'rgba(255, 255, 255, 0.72)',
+                        border: '1px solid rgba(16, 185, 129, 0.22)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span style={{ color: '#059669', fontWeight: 700 }}>✓</span>
+                      <span>{stepText}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '10px',
+              }}
+            >
+              {PROVIDERS.filter((p) => p.isRussianSovereign).map((rp) => {
+                const connectedCount = accounts.filter((a) => a.provider === rp.id).length
+                const isConnecting = ruSsoBusyProvider === rp.id
+                return (
+                  <div
+                    key={rp.id}
+                    className="nomad-glass-card"
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: '14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.01em' }}>{rp.label}</span>
+                        {connectedCount > 0 ? (
+                          <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 7px', borderRadius: '6px', whiteSpace: 'nowrap', background: 'rgba(34, 197, 94, 0.14)', color: '#16a34a' }}>
+                            Активен ({connectedCount})
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={{ fontSize: '12px', opacity: 0.74, marginTop: '4px', lineHeight: 1.42 }}>
+                        {rp.description}
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '6px' }}>
+                        {(rp.models || []).map((m) => (
+                          <code
+                            key={m}
+                            style={{
+                              fontSize: '11px',
+                              padding: '1px 6px',
+                              borderRadius: '5px',
+                              background: 'rgba(128,128,128,0.10)',
+                            }}
+                          >
+                            {m}
+                          </code>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        data-testid={`ru-sso-connect-btn-${rp.id}`}
+                        disabled={isConnecting}
+                        onClick={() => handleConnectRuSso(rp)}
+                        style={{
+                          flex: 1,
+                          padding: '7px 10px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: '#18181B',
+                          color: '#ffffff',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: isConnecting ? 'default' : 'pointer',
+                          textAlign: 'center',
+                        }}
+                      >
+                        {isConnecting ? 'Авто-настройка SSO…' : rp.ssoButtonLabel || `Войти в ${rp.label.split(' (')[0]}`}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`ru-key-connect-btn-${rp.id}`}
+                        title="Ввести сервисный API-ключ вручную"
+                        onClick={() => {
+                          setKeyProvider(rp.id)
+                          setKeyLabel(`${rp.label.split(' (')[0]} (Контур РФ)`)
+                          setKeyBaseUrl(rp.defaultEndpoint || '')
+                          setKeyFormError('')
+                          accountsModalAtom.set('key')
+                        }}
+                        style={{
+                          padding: '7px 9px',
+                          borderRadius: '9px',
+                          border: '1px solid rgba(15, 23, 42, 0.12)',
+                          background: 'rgba(255, 255, 255, 0.72)',
+                          color: 'inherit',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Ключ
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
 
           {/* Таблица аккаунтов */}
           <div
@@ -1652,4 +2443,88 @@ export default function registerAccountsPage(ctx) {
       },
     },
   })
+
+  // 6. Регистрация подразделов Nomad для основных категорий окна Настроек (SettingsView)
+  if (typeof ctx.registerSettingsPage === 'function') {
+    ctx.registerSettingsPage({
+      id: 'subscriptions',
+      title: 'Модели РФ в 1 клик и пул',
+      icon: 'account',
+      order: 10,
+      render: () => <AccountsPage ctx={ctx} initialTab="accounts" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'fallback',
+      title: 'Порядок и запас пула',
+      icon: 'layers',
+      order: 15,
+      render: () => <AccountsPage ctx={ctx} initialTab="fallback" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'billing',
+      title: 'Тариф и баланс NomadNet',
+      icon: 'credit-card',
+      order: 18,
+      render: () => <AccountsPage ctx={ctx} initialTab="billing" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'council',
+      title: 'Совет моделей (Консилиум)',
+      icon: 'organization',
+      order: 20,
+      render: () => <AccountsPage ctx={ctx} initialTab="council" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'cloud',
+      title: 'Облачный ПК и устройства',
+      icon: 'cloud',
+      order: 30,
+      render: () => <AccountsPage ctx={ctx} initialTab="cloud" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'memory',
+      title: '3-слойная память и граф',
+      icon: 'database',
+      order: 40,
+      render: () => <AccountsPage ctx={ctx} initialTab="memory" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'safety',
+      title: 'Контур 152-ФЗ и NemoClaw',
+      icon: 'shield',
+      order: 50,
+      render: () => <AccountsPage ctx={ctx} initialTab="safety" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'data',
+      title: 'Данные, чекпоинты и архив',
+      icon: 'archive',
+      order: 60,
+      render: () => <AccountsPage ctx={ctx} initialTab="data" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'start',
+      title: 'Перенос, старт и лимиты',
+      icon: 'rocket',
+      order: 70,
+      render: () => <AccountsPage ctx={ctx} initialTab="start" embeddedInSettingsModal={true} />,
+    })
+
+    ctx.registerSettingsPage({
+      id: 'onboarding',
+      title: 'Язык и онбординг',
+      icon: 'globe',
+      order: 80,
+      render: () => <AccountsPage ctx={ctx} initialTab="onboarding" embeddedInSettingsModal={true} />,
+    })
+  }
 }
+

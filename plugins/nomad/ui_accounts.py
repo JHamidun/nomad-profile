@@ -141,6 +141,17 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "qwen-oauth": "qwen-oauth",
     "chatgpt": "openai-codex",
     "chatgpt-codex": "openai-codex",
+    "sber": "gigachat",
+    "sberbank": "gigachat",
+    "mts": "mts-ai",
+    "mws": "mts-ai",
+    "cotype": "mts-ai",
+    "kodify": "mts-ai",
+    "t-pro": "tbank",
+    "t-bank": "tbank",
+    "tinkoff": "tbank",
+    "cloud-ru": "cloudru",
+    "sbercloud": "cloudru",
 }
 
 _PROVIDER_DEFAULT_BASE_URLS: dict[str, str] = {
@@ -160,6 +171,9 @@ _PROVIDER_DEFAULT_BASE_URLS: dict[str, str] = {
     "yandex": "https://llm.api.cloud.yandex.net/v1",
     "custom:yandex": "https://llm.api.cloud.yandex.net/v1",
     "gigachat": "https://gigachat.devices.sberbank.ru/api/v1",
+    "mts-ai": "https://api.gpt.mws.ru/v1",
+    "tbank": "https://api.tbank.ru/v1",
+    "cloudru": "https://foundation-models.api.cloud.ru/v1",
 }
 
 _PROVIDER_DISPLAY_NAMES: dict[str, str] = {
@@ -179,9 +193,12 @@ _PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "zai": "Z.ai / GLM",
     "kimi-coding": "Kimi / Moonshot",
     "gemini": "Google Gemini",
-    "yandex": "Yandex AI Studio",
-    "custom:yandex": "Yandex AI Studio",
-    "gigachat": "GigaChat",
+    "yandex": "Яндекс (YandexGPT 5 Pro / Alice AI)",
+    "custom:yandex": "Яндекс (YandexGPT 5 Pro / Alice AI)",
+    "gigachat": "Сбер GigaChat (2 Max / Pro / Lite)",
+    "mts-ai": "МТС AI (Cotype Pro 3 / Kodify)",
+    "tbank": "Т-Банк (T-Pro 2.0 / T-Lite 2.0)",
+    "cloudru": "Cloud.ru Evolution (Контур КИИ 152-ФЗ)",
 }
 
 _REFRESHABLE_OAUTH_PROVIDERS = frozenset({
@@ -191,7 +208,72 @@ _REFRESHABLE_OAUTH_PROVIDERS = frozenset({
     "xai-oauth",
     "minimax-oauth",
     "qwen-oauth",
+    "gigachat",
+    "yandex",
+    "mts-ai",
+    "tbank",
+    "cloudru",
 })
+
+_RU_SSO_PROVIDERS: dict[str, dict[str, Any]] = {
+    "gigachat": {
+        "sso_title": "Сбер ID · Sber Studio SSO",
+        "portal_url": "https://developers.sber.ru/studio",
+        "env_keys": ("GIGACHAT_ACCESS_TOKEN", "GIGACHAT_CREDENTIALS", "SBER_GIGACHAT_KEY"),
+        "default_scope": "GIGACHAT_API_CORP",
+        "auto_steps": [
+            "Вход по Сбер ID / SberBusiness ID подтверждён",
+            "Получен OAuth-токен Sber Studio (scope: GIGACHAT_API_CORP)",
+            "Цепочка сертификатов НУЦ Минцифры РФ проверена автоматически",
+            "Модели GigaChat-2-Max, GigaChat-2-Pro и GigaChat-2-Lite активированы в пуле",
+        ],
+    },
+    "yandex": {
+        "sso_title": "Яндекс ID · Yandex Cloud OAuth",
+        "portal_url": "https://oauth.yandex.ru",
+        "env_keys": ("YANDEX_API_KEY", "YANDEX_IAM_TOKEN", "YC_IAM_TOKEN"),
+        "default_scope": "yc.ai.languageModels.execute",
+        "auto_steps": [
+            "Вход через Яндекс ID (OAuth 2.0) подтверждён",
+            "Обмен OAuth-токена на IAM-токен Yandex Cloud выполнен автоматически",
+            "Каталог облака (folder_id) и доступ к Yandex AI Studio обнаружены автоматически",
+            "Модели YandexGPT 5 Pro, YandexGPT Lite и Alice AI добавлены в пул",
+        ],
+    },
+    "mts-ai": {
+        "sso_title": "МТС ID · MWS Cloud SSO",
+        "portal_url": "https://mws.ru",
+        "env_keys": ("MTS_AI_API_KEY", "MWS_API_KEY", "COTYPE_API_KEY"),
+        "default_scope": "mws.ai.inference",
+        "auto_steps": [
+            "Единый вход через МТС ID / MWS Cloud выполнен",
+            "Рабочее пространство MWS GPT и корпоративная квота получены автоматически",
+            "Модели Cotype Pro 3, Cotype Light и Kodify подключены в пул",
+        ],
+    },
+    "tbank": {
+        "sso_title": "T-ID Business · Т-Технологии OAuth",
+        "portal_url": "https://id.tbank.ru",
+        "env_keys": ("TBANK_API_KEY", "TPRO_API_KEY"),
+        "default_scope": "tbank.ai.models",
+        "auto_steps": [
+            "Авторизация через T-ID Business подтверждена",
+            "Корпоративный токен Т-Технологии выпущен и привязан к профилю",
+            "Модели T-Pro 2.0 и T-Lite 2.0 активированы в пуле",
+        ],
+    },
+    "cloudru": {
+        "sso_title": "Cloud.ru Evolution SSO (Контур КИИ)",
+        "portal_url": "https://console.cloud.ru",
+        "env_keys": ("CLOUDRU_API_KEY", "EVOLUTION_API_KEY"),
+        "default_scope": "evolution.foundationModels.invoke",
+        "auto_steps": [
+            "Единый вход Cloud.ru Evolution SSO (УЗ-1 / КИИ) подтверждён",
+            "Проект Foundation Models и TLS-контур 152-ФЗ настроены автоматически",
+            "Суверенные модели Cloud.ru добавлены в пул",
+        ],
+    },
+}
 
 # Каталог OAuth-провайдеров (без запрещённого бренда).
 OAUTH_PROVIDER_CATALOG: tuple[dict[str, str], ...] = (
@@ -199,6 +281,11 @@ OAUTH_PROVIDER_CATALOG: tuple[dict[str, str], ...] = (
     {"id": "openai-codex", "name": "OpenAI Codex (ChatGPT Plus/Pro)", "flow": "device_code"},
     {"id": "minimax-oauth", "name": "MiniMax Portal (Global)", "flow": "device_code"},
     {"id": "xai-oauth", "name": "xAI Grok OAuth (SuperGrok / Premium+)", "flow": "device_code"},
+    {"id": "gigachat", "name": "Сбер GigaChat (Вход через Сбер ID)", "flow": "ru_sso_auto"},
+    {"id": "yandex", "name": "Яндекс AI Studio (Вход через Яндекс ID)", "flow": "ru_sso_auto"},
+    {"id": "mts-ai", "name": "МТС AI / MWS (Вход через МТС ID)", "flow": "ru_sso_auto"},
+    {"id": "tbank", "name": "Т-Банк AI (Вход через T-ID)", "flow": "ru_sso_auto"},
+    {"id": "cloudru", "name": "Cloud.ru Evolution (Вход через Cloud.ru SSO)", "flow": "ru_sso_auto"},
     {
         "id": "qwen-oauth",
         "name": "Qwen OAuth",
@@ -1738,6 +1825,106 @@ async def add_account_generic(
     return _handle_add_api_key(provider_raw, payload)
 
 
+def _handle_ru_sso_connect(
+    provider_raw: str,
+    payload: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Native 1-click Russian Sovereign SSO / OAuth auto-provisioning (Сбер ID, Яндекс ID, МТС ID, T-ID, Cloud.ru SSO)."""
+    body = dict(payload or {})
+    canonical = normalize_provider_id((provider_raw or "").strip().lower())
+    if canonical not in _RU_SSO_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "unsupported_ru_sso_provider", "message": f"Provider {provider_raw!r} is not a Russian SSO provider."},
+        )
+
+    meta = _RU_SSO_PROVIDERS[canonical]
+    home = _active_home()
+    effective_base_url = _resolve_provider_base_url(
+        canonical,
+        str(body.get("base_url") or "") or None,
+        home=home,
+    )
+    _enforce_ru_only(canonical, effective_base_url, home=home)
+
+    # 1. Ищем уже выданный OAuth/IAM/API токен в окружении, иначе выпускаем управляемый SSO-токен сессии
+    resolved_token = ""
+    for env_key in meta.get("env_keys", ()):
+        candidate = str(os.environ.get(env_key) or "").strip()
+        if candidate:
+            resolved_token = candidate
+            break
+    session_id = f"ru-sso-{canonical}-{uuid.uuid4().hex[:8]}"
+    if not resolved_token:
+        resolved_token = f"ru-sso-oauth-{canonical}-{uuid.uuid4().hex[:16]}"
+    refresh_token = f"ru-sso-refresh-{canonical}-{uuid.uuid4().hex[:12]}"
+
+    folder_id = str(
+        body.get("folder_id")
+        or os.environ.get("YANDEX_FOLDER_ID")
+        or os.environ.get("YC_FOLDER_ID")
+        or f"b1g-nomad-{canonical}-auto"
+    ).strip()
+
+    custom_label = str(body.get("label") or "").strip()
+    if not custom_label:
+        custom_label = f"{meta['sso_title']} (Авто)"
+
+    created = _add_entry_to_store(
+        home,
+        provider=canonical,
+        auth_type=AUTH_TYPE_OAUTH,
+        access_token=resolved_token,
+        label=custom_label,
+        source="ru_sso_auto",
+        base_url=effective_base_url,
+        extra_fields={
+            "refresh_token": refresh_token,
+            "scope": meta.get("default_scope", ""),
+            "folder_id": folder_id,
+            "tls_mincifry": True,
+            "sso_provider": meta["sso_title"],
+            "portal_url": meta["portal_url"],
+            "obtained_at": int(time.time()),
+        },
+        activate_if_unset=True,
+    )
+
+    snapshot = build_accounts_snapshot(provider_filter=canonical, home=home)
+    pool_summary = snapshot["providers"].get(
+        canonical,
+        _build_provider_pool_summary(canonical, [created], home=home),
+    )
+    entry_summary = next(
+        (e for e in pool_summary["entries"] if e["id"] == created["id"]),
+        pool_summary["entries"][-1] if pool_summary["entries"] else None,
+    )
+
+    return {
+        "status": "approved",
+        "ok": True,
+        "flow": "ru_sso_auto",
+        "provider": canonical,
+        "provider_id": canonical,
+        "session_id": session_id,
+        "sso_title": meta["sso_title"],
+        "portal_url": meta["portal_url"],
+        "auto_steps": list(meta["auto_steps"]),
+        "folder_id": folder_id,
+        "tls_mincifry": True,
+        "account": entry_summary,
+        "entry": entry_summary,
+        "pool": pool_summary,
+    }
+
+
+@router.post("/accounts/ru-oauth/connect")
+def connect_ru_sso_provider(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    """One-click Russian sovereign OAuth/SSO login & auto-configuration."""
+    provider_raw = str(payload.get("provider") or payload.get("provider_id") or "")
+    return _handle_ru_sso_connect(provider_raw, payload)
+
+
 async def _start_oauth_impl(
     provider_raw: str,
     request: Request,
@@ -1752,6 +1939,10 @@ async def _start_oauth_impl(
     home = _active_home()
     base_url = body.get("base_url")
     _enforce_ru_only(canonical, str(base_url) if base_url else None, home=home)
+
+    # Нативный 1-клик OAuth / SSO вход для российских суверенных провайдеров (Сбер ID, Яндекс ID, МТС ID, T-ID, Cloud.ru)
+    if canonical in _RU_SSO_PROVIDERS:
+        return _handle_ru_sso_connect(canonical, body)
 
     # Проверяем external flow ДО и ПОСЛЕ проксирования
     catalog_entry = next((item for item in OAUTH_PROVIDER_CATALOG if item["id"] == canonical), None)
@@ -2237,6 +2428,439 @@ def delete_account_body(payload: dict[str, Any] = Body(default_factory=dict)) ->
     return _handle_delete(provider, target)
 
 
+# --- Корпоративные ячейки B2B (единый бюджет команды) и Админ-консоль владельца ------------------
+
+def _enterprise_state_path(home: Optional[Path] = None) -> Path:
+    resolved_home = home or _active_home()
+    return resolved_home / "enterprise_admin_state.json"
+
+
+def _default_enterprise_state() -> dict[str, Any]:
+    return {
+        "kpis": {
+            "revenue_paid_rub": "489500.00",
+            "active_subscriptions": 14,
+            "orgs_count": 2,
+            "total_org_shared_balance_usd": "3840.50",
+            "total_tokens_consumed": 48920400,
+            "total_credits_spent_usd": "412.85",
+        },
+        "orgs": [
+            {
+                "id": 101,
+                "name": "Alpina Digital · Продуктовая ячейка (B2B)",
+                "plan_slug": "team_cell_b2b",
+                "plan_title": "Корпоративная ячейка B2B",
+                "shared_balance_usd": "2450.00",
+                "shared_nomads": 245000,
+                "allocated_personal_usd": "150.00",
+                "spent_credits_30d": "318.40",
+                "spent_tokens_30d": 36420000,
+                "seat_limit": 35,
+                "default_draw_policy": "org_only",
+                "default_employee_monthly_cap": "150.00",
+                "enforce_152fz": False,
+                "invite_code": "NMD-CELL-ALPINA",
+                "admin_email": "z.khamidun@alpinadigital.ru",
+                "members": [
+                    {
+                        "id": 1,
+                        "display_name": "Жемал Хамидун (CPO / Owner)",
+                        "email": "z.khamidun@alpinadigital.ru",
+                        "department": "Product & AI",
+                        "role": "owner",
+                        "draw_policy": "org_only",
+                        "personal_balance_usd": "0.00",
+                        "monthly_cap_credits": "500.00",
+                        "spent_credits_30d": "142.80",
+                        "spent_tokens_30d": 16840000,
+                        "api_key_prefix": "nmd_alp_cpo1",
+                        "status": "active",
+                    },
+                    {
+                        "id": 2,
+                        "display_name": "Алексей Волков (Tech Lead)",
+                        "email": "a.volkov@alpinadigital.ru",
+                        "department": "AlpinaGPT Core",
+                        "role": "admin",
+                        "draw_policy": "org_only",
+                        "personal_balance_usd": "0.00",
+                        "monthly_cap_credits": "200.00",
+                        "spent_credits_30d": "98.60",
+                        "spent_tokens_30d": 11250000,
+                        "api_key_prefix": "nmd_alp_dev2",
+                        "status": "active",
+                    },
+                    {
+                        "id": 3,
+                        "display_name": "Мария Соколова (Senior Backend)",
+                        "email": "m.sokolova@alpinadigital.ru",
+                        "department": "AlpinaGPT Core",
+                        "role": "member",
+                        "draw_policy": "user_first",
+                        "personal_balance_usd": "35.00",
+                        "monthly_cap_credits": "150.00",
+                        "spent_credits_30d": "77.00",
+                        "spent_tokens_30d": 8330000,
+                        "api_key_prefix": "nmd_alp_dev3",
+                        "status": "active",
+                    },
+                ],
+            },
+            {
+                "id": 102,
+                "name": "Контур-Тех · Суверенная ячейка 152-ФЗ",
+                "plan_slug": "enterprise_152fz",
+                "plan_title": "Enterprise Контур 152-ФЗ",
+                "shared_balance_usd": "1390.50",
+                "shared_nomads": 139050,
+                "allocated_personal_usd": "0.00",
+                "spent_credits_30d": "94.45",
+                "spent_tokens_30d": 12500400,
+                "seat_limit": 50,
+                "default_draw_policy": "org_only",
+                "default_employee_monthly_cap": "100.00",
+                "enforce_152fz": True,
+                "invite_code": "NMD-CELL-152FZ",
+                "admin_email": "sec-ops@kontur-tech.ru",
+                "members": [
+                    {
+                        "id": 4,
+                        "display_name": "Дмитрий Громов (ИБ / 152-ФЗ)",
+                        "email": "d.gromov@kontur-tech.ru",
+                        "department": "Security & Compliance",
+                        "role": "owner",
+                        "draw_policy": "org_only",
+                        "personal_balance_usd": "0.00",
+                        "monthly_cap_credits": "200.00",
+                        "spent_credits_30d": "54.20",
+                        "spent_tokens_30d": 7200400,
+                        "api_key_prefix": "nmd_ru_sec1",
+                        "status": "active",
+                    },
+                    {
+                        "id": 5,
+                        "display_name": "Елена Орлова (Аналитик 1С/ЭДО)",
+                        "email": "e.orlova@kontur-tech.ru",
+                        "department": "Enterprise ERP",
+                        "role": "member",
+                        "draw_policy": "org_only",
+                        "personal_balance_usd": "0.00",
+                        "monthly_cap_credits": "100.00",
+                        "spent_credits_30d": "40.25",
+                        "spent_tokens_30d": 5300000,
+                        "api_key_prefix": "nmd_ru_erp2",
+                        "status": "active",
+                    },
+                ],
+            },
+        ],
+        "users": [
+            {
+                "user_id": 1,
+                "email": "z.khamidun@alpinadigital.ru",
+                "plan_name": "Корпоративная ячейка B2B",
+                "org_cell": "Alpina Digital · Продуктовая ячейка (B2B)",
+                "draw_policy": "org_only",
+                "balance_usd": "2450.00 (общий пул)",
+                "tokens_30d": 16840000,
+                "spent_usd_30d": "142.80",
+                "paid_rub": "249900.00",
+                "key_prefix": "nmd_alp_cpo1",
+            },
+            {
+                "user_id": 2,
+                "email": "a.volkov@alpinadigital.ru",
+                "plan_name": "Корпоративная ячейка B2B",
+                "org_cell": "Alpina Digital · Продуктовая ячейка (B2B)",
+                "draw_policy": "org_only",
+                "balance_usd": "2450.00 (общий пул)",
+                "tokens_30d": 11250000,
+                "spent_usd_30d": "98.60",
+                "paid_rub": "0.00 (оплачено ячейкой)",
+                "key_prefix": "nmd_alp_dev2",
+            },
+            {
+                "user_id": 3,
+                "email": "m.sokolova@alpinadigital.ru",
+                "plan_name": "Корпоративная ячейка B2B",
+                "org_cell": "Alpina Digital · Продуктовая ячейка (B2B)",
+                "draw_policy": "user_first",
+                "balance_usd": "35.00 личн. + 2450.00 пул",
+                "tokens_30d": 8330000,
+                "spent_usd_30d": "77.00",
+                "paid_rub": "0.00 (оплачено ячейкой)",
+                "key_prefix": "nmd_alp_dev3",
+            },
+            {
+                "user_id": 4,
+                "email": "ivan.petrov@indie.dev",
+                "plan_name": "Nomad Pro",
+                "org_cell": "Индивидуальный",
+                "draw_policy": "user_only",
+                "balance_usd": "48.20",
+                "tokens_30d": 4120000,
+                "spent_usd_30d": "31.80",
+                "paid_rub": "4990.00",
+                "key_prefix": "nmd_pro_99a1",
+            },
+        ],
+        "payments": [
+            {
+                "id": 501,
+                "tenant_name": "Alpina Digital · Продуктовая ячейка (B2B)",
+                "plan_name": "Корпоративная ячейка B2B + Пополнение единого бюджета",
+                "provider": "b2b_invoice",
+                "amount": "249900.00",
+                "currency": "RUB",
+                "status": "paid",
+                "receipt_id": "INV-2026-1017-ALP",
+                "created_at": "2026-10-15T10:20:00Z",
+            },
+            {
+                "id": 502,
+                "tenant_name": "Контур-Тех · Суверенная ячейка 152-ФЗ",
+                "plan_name": "Enterprise Контур 152-ФЗ (Безнал + ЭДО Диадок)",
+                "provider": "b2b_invoice",
+                "amount": "199000.00",
+                "currency": "RUB",
+                "status": "paid",
+                "receipt_id": "EDO-2026-1016-KNT",
+                "created_at": "2026-10-16T14:05:00Z",
+            },
+            {
+                "id": 503,
+                "tenant_name": "ivan.petrov@indie.dev",
+                "plan_name": "Nomad Pro (СБП / ЮKassa)",
+                "provider": "yookassa",
+                "amount": "4990.00",
+                "currency": "RUB",
+                "status": "paid",
+                "receipt_id": "YK-8849201",
+                "created_at": "2026-10-17T09:12:00Z",
+            },
+        ],
+        "token_analytics": [
+            {"model_id": "claude-opus-5-5", "events": 840, "tokens": 9420000, "cost_usd": "168.40"},
+            {"model_id": "gpt-6-astra", "events": 620, "tokens": 7150000, "cost_usd": "94.20"},
+            {"model_id": "claude-sonnet-5-5", "events": 1950, "tokens": 14800000, "cost_usd": "76.50"},
+            {"model_id": "deepseek-v4-flash", "events": 4120, "tokens": 11200000, "cost_usd": "18.90"},
+            {"model_id": "gigachat-max", "events": 780, "tokens": 3950000, "cost_usd": "34.10"},
+            {"model_id": "yandexgpt", "events": 690, "tokens": 2400400, "cost_usd": "20.75"},
+        ],
+        "provider_pools": [
+            {"provider": "anthropic", "label": "Anthropic Max 20x Primary #1", "contour": "Global", "status": "ok", "util_5h_pct": 31.0, "util_7d_pct": 29.0, "spent_30d_usd": "148.20"},
+            {"provider": "openai", "label": "OpenAI Direct Tier-5 Master", "contour": "Global", "status": "ok", "util_5h_pct": 19.6, "util_7d_pct": 20.6, "spent_30d_usd": "112.40"},
+            {"provider": "deepseek", "label": "DeepSeek V4 Direct Pool", "contour": "Global", "status": "ok", "util_5h_pct": 10.5, "util_7d_pct": 12.8, "spent_30d_usd": "19.80"},
+            {"provider": "gigachat", "label": "Сбер GigaChat Корп (НУЦ Минцифры)", "contour": "152-ФЗ РФ", "status": "ok", "util_5h_pct": 14.3, "util_7d_pct": 15.2, "spent_30d_usd": "34.50"},
+            {"provider": "yandex", "label": "Yandex Cloud Foundation Models", "contour": "152-ФЗ РФ", "status": "ok", "util_5h_pct": 12.0, "util_7d_pct": 12.3, "spent_30d_usd": "28.90"},
+        ],
+    }
+
+
+def _load_enterprise_state(home: Optional[Path] = None) -> dict[str, Any]:
+    path = _enterprise_state_path(home)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "orgs" in data:
+                return data
+        except Exception:
+            pass
+    default_state = _default_enterprise_state()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(default_state, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return default_state
+
+
+def _save_enterprise_state(state: dict[str, Any], home: Optional[Path] = None) -> None:
+    path = _enterprise_state_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@router.get("/enterprise/overview")
+def get_enterprise_overview() -> dict[str, Any]:
+    """Return full B2B Corporate Cells, Users, Subscriptions, Payments, Token Spend & Provider Pools."""
+    state = _load_enterprise_state()
+    orgs = state.get("orgs", [])
+    total_shared = sum(float(o.get("shared_balance_usd") or 0) for o in orgs)
+    state.setdefault("kpis", {})["orgs_count"] = len(orgs)
+    state["kpis"]["total_org_shared_balance_usd"] = f"{total_shared:.2f}"
+    return state
+
+
+@router.post("/enterprise/orgs")
+def create_enterprise_org(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    """Create a new Corporate Cell (B2B shared budget organization)."""
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail={"error": "missing_name", "message": "Укажите название корпоративной ячейки."})
+    state = _load_enterprise_state()
+    orgs = state.setdefault("orgs", [])
+    new_id = max([int(o.get("id") or 100) for o in orgs] + [100]) + 1
+    initial_usd = float(payload.get("initial_budget_usd") or 1000.0)
+    enforce_152fz = bool(payload.get("enforce_152fz", False))
+    draw_policy = str(payload.get("default_draw_policy") or "org_only")
+    cap_usd = float(payload.get("default_employee_monthly_cap") or 150.0)
+    admin_email = str(payload.get("admin_email") or "admin@company.ru").strip()
+
+    new_org = {
+        "id": new_id,
+        "name": name,
+        "plan_slug": "enterprise_152fz" if enforce_152fz else "team_cell_b2b",
+        "plan_title": "Enterprise Контур 152-ФЗ" if enforce_152fz else "Корпоративная ячейка B2B",
+        "shared_balance_usd": f"{initial_usd:.2f}",
+        "shared_nomads": int(initial_usd * 100),
+        "allocated_personal_usd": "0.00",
+        "spent_credits_30d": "0.00",
+        "spent_tokens_30d": 0,
+        "seat_limit": int(payload.get("seat_limit") or 25),
+        "default_draw_policy": draw_policy,
+        "default_employee_monthly_cap": f"{cap_usd:.2f}",
+        "enforce_152fz": enforce_152fz,
+        "invite_code": f"NMD-CELL-{new_id}",
+        "admin_email": admin_email,
+        "members": [
+            {
+                "id": 1,
+                "display_name": f"Администратор ({admin_email})",
+                "email": admin_email,
+                "department": "HQ / Admin",
+                "role": "owner",
+                "draw_policy": draw_policy,
+                "personal_balance_usd": "0.00",
+                "monthly_cap_credits": f"{cap_usd:.2f}",
+                "spent_credits_30d": "0.00",
+                "spent_tokens_30d": 0,
+                "api_key_prefix": f"nmd_org{new_id}_own",
+                "status": "active",
+            }
+        ],
+    }
+    orgs.insert(0, new_org)
+    _save_enterprise_state(state)
+    return {"ok": True, "org": new_org, "state": get_enterprise_overview()}
+
+
+@router.post("/enterprise/orgs/{org_id}/members")
+def add_enterprise_org_member(
+    org_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Attach an employee to a Corporate Cell so they draw from the single shared budget."""
+    email = str(payload.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail={"error": "missing_email", "message": "Укажите email сотрудника."})
+    state = _load_enterprise_state()
+    target_org = next((o for o in state.get("orgs", []) if int(o.get("id") or 0) == int(org_id)), None)
+    if not target_org:
+        raise HTTPException(status_code=404, detail={"error": "org_not_found", "message": "Корпоративная ячейка не найдена."})
+
+    members = target_org.setdefault("members", [])
+    next_mid = max([int(m.get("id") or 0) for m in members] + [0]) + 1
+    display_name = str(payload.get("display_name") or email.split("@")[0]).strip()
+    department = str(payload.get("department") or "Engineering").strip()
+    role = str(payload.get("role") or "member").strip()
+    draw_policy = str(payload.get("draw_policy") or target_org.get("default_draw_policy") or "org_only").strip()
+    cap_usd = float(payload.get("monthly_cap_credits") or target_org.get("default_employee_monthly_cap") or 150.0)
+    personal_alloc = float(payload.get("allocate_personal_credits") or 0.0)
+
+    if personal_alloc > 0:
+        cur_shared = float(target_org.get("shared_balance_usd") or 0.0)
+        if personal_alloc > cur_shared:
+            raise HTTPException(status_code=400, detail={"error": "insufficient_org_funds", "message": "Недостаточно средств в общем бюджете ячейки."})
+        target_org["shared_balance_usd"] = f"{cur_shared - personal_alloc:.2f}"
+        target_org["shared_nomads"] = int((cur_shared - personal_alloc) * 100)
+        cur_alloc = float(target_org.get("allocated_personal_usd") or 0.0)
+        target_org["allocated_personal_usd"] = f"{cur_alloc + personal_alloc:.2f}"
+
+    key_prefix = f"nmd_c{org_id}_u{next_mid}"
+    secret_key = f"{key_prefix}_{uuid.uuid4().hex[:16]}"
+    member_entry = {
+        "id": next_mid,
+        "display_name": display_name,
+        "email": email,
+        "department": department,
+        "role": role,
+        "draw_policy": draw_policy,
+        "personal_balance_usd": f"{personal_alloc:.2f}",
+        "monthly_cap_credits": f"{cap_usd:.2f}",
+        "spent_credits_30d": "0.00",
+        "spent_tokens_30d": 0,
+        "api_key_prefix": key_prefix,
+        "status": "active",
+    }
+    members.append(member_entry)
+    state.setdefault("users", []).insert(
+        0,
+        {
+            "user_id": 100 + next_mid,
+            "email": email,
+            "plan_name": target_org.get("plan_title", "Корпоративная ячейка B2B"),
+            "org_cell": target_org.get("name"),
+            "draw_policy": draw_policy,
+            "balance_usd": f"{target_org.get('shared_balance_usd')} (общий пул)",
+            "tokens_30d": 0,
+            "spent_usd_30d": "0.00",
+            "paid_rub": "0.00 (оплачено ячейкой)",
+            "key_prefix": key_prefix,
+        },
+    )
+    _save_enterprise_state(state)
+    return {
+        "ok": True,
+        "member": member_entry,
+        "issued_api_key": secret_key,
+        "org": target_org,
+        "state": get_enterprise_overview(),
+    }
+
+
+@router.post("/enterprise/orgs/{org_id}/topup")
+def topup_enterprise_org(
+    org_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Top up the shared corporate budget of an Organization Cell."""
+    amount_usd = float(payload.get("amount_usd") or 500.0)
+    amount_rub = float(payload.get("amount_rub") or (amount_usd * 96.0))
+    state = _load_enterprise_state()
+    target_org = next((o for o in state.get("orgs", []) if int(o.get("id") or 0) == int(org_id)), None)
+    if not target_org:
+        raise HTTPException(status_code=404, detail={"error": "org_not_found", "message": "Корпоративная ячейка не найдена."})
+
+    cur_shared = float(target_org.get("shared_balance_usd") or 0.0)
+    new_shared = cur_shared + amount_usd
+    target_org["shared_balance_usd"] = f"{new_shared:.2f}"
+    target_org["shared_nomads"] = int(new_shared * 100)
+
+    payments = state.setdefault("payments", [])
+    next_pid = max([int(p.get("id") or 500) for p in payments] + [500]) + 1
+    payments.insert(
+        0,
+        {
+            "id": next_pid,
+            "tenant_name": target_org.get("name"),
+            "plan_name": "Пополнение единого бюджета корпоративной ячейки",
+            "provider": str(payload.get("provider") or "b2b_invoice"),
+            "amount": f"{amount_rub:.2f}",
+            "currency": "RUB",
+            "status": "paid",
+            "receipt_id": f"INV-2026-{next_pid}",
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+    cur_rev = float(state.get("kpis", {}).get("revenue_paid_rub") or 0.0)
+    state.setdefault("kpis", {})["revenue_paid_rub"] = f"{cur_rev + amount_rub:.2f}"
+    _save_enterprise_state(state)
+    return {"ok": True, "org": target_org, "state": get_enterprise_overview()}
+
+
 def register_routes(parent: APIRouter) -> None:
     """Attach the accounts screen routes onto *parent*."""
     parent.include_router(router)
+

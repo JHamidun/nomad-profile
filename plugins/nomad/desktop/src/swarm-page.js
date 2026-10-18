@@ -8,6 +8,7 @@ import {
   ROUTES_AREA,
   STATUSBAR_AREAS,
   atom,
+  host,
   useValue,
 } from '@hermes/plugin-sdk'
 import { createElement, useCallback, useEffect, useState } from 'react'
@@ -17,12 +18,35 @@ export const swarmStatusAtom = atom({ count: 0, activeId: null, label: 'Рой: 
 
 const h = createElement
 
+function navigateToSwarm(ctx) {
+  if (ctx && ctx.host && typeof ctx.host.navigate === 'function') {
+    ctx.host.navigate(SWARM_ROUTE_PATH)
+    return
+  }
+  if (host && typeof host.navigate === 'function') {
+    host.navigate(SWARM_ROUTE_PATH)
+  }
+}
+
 function restGet(ctx, path) {
   if (typeof ctx?.rest === 'function') {
     return Promise.resolve(ctx.rest(path, { method: 'GET' }))
   }
   if (typeof ctx?.rest?.get === 'function') {
     return Promise.resolve(ctx.rest.get(path))
+  }
+  if (typeof fetch === 'function') {
+    const normalizedPath = String(path || '').startsWith('/api/plugins/nomad')
+      ? String(path).slice('/api/plugins/nomad'.length) || '/'
+      : String(path || '').startsWith('/')
+        ? String(path)
+        : `/${path}`
+    return fetch(`/api/plugins/nomad${normalizedPath}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .catch(() => null)
   }
   return Promise.resolve(null)
 }
@@ -40,10 +64,26 @@ export function formatTimeRu(isoString) {
 export function SwarmStatusbarPill({ ctx }) {
   const status = useValue(swarmStatusAtom) || { count: 0, label: 'Рой: 0' }
 
-  const handleClick = useCallback(() => {
-    if (ctx && ctx.host && typeof ctx.host.navigate === 'function') {
-      ctx.host.navigate(SWARM_ROUTE_PATH)
+  useEffect(() => {
+    let mounted = true
+    restGet(ctx, '/swarm')
+      .then((res) => {
+        if (!mounted || !res || !res.ok) return
+        const count = (res.swarms || []).length
+        swarmStatusAtom.set({
+          count,
+          activeId: res.swarms?.[0]?.id || null,
+          label: `Рой: ${count}`,
+        })
+      })
+      .catch(() => {})
+    return () => {
+      mounted = false
     }
+  }, [ctx])
+
+  const handleClick = useCallback(() => {
+    navigateToSwarm(ctx)
   }, [ctx])
 
   return h(
@@ -120,7 +160,7 @@ export function SwarmTree({ tree = [] }) {
                 width: '10px',
                 height: '10px',
                 borderRadius: '50%',
-                background: node.status === 'completed' ? '#10b981' : '#3b82f6',
+                background: node.status === 'completed' ? '#10b981' : '#27272A',
               },
             }),
             h('strong', { style: { fontSize: '14px' } }, node.title || node.goal || node.id),
@@ -322,6 +362,7 @@ export default function registerSwarmPagePlugin(ctx) {
       path: SWARM_ROUTE_PATH,
       title: 'Рой',
       codicon: 'organization',
+      render: () => h(SwarmPage, { ctx }),
     },
     render: () => h(SwarmPage, { ctx }),
   })
@@ -338,9 +379,7 @@ export default function registerSwarmPagePlugin(ctx) {
       category: 'Nomad',
       keywords: ['рой', 'оркестратор', 'дирижёр', 'задачи', 'дерево', 'swarm', 'lanes'],
       run: () => {
-        if (ctx?.host?.navigate) {
-          ctx.host.navigate(SWARM_ROUTE_PATH)
-        }
+        navigateToSwarm(ctx)
       },
     },
   })

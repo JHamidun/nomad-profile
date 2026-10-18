@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from . import capabilities, ru_only
 
@@ -118,6 +118,41 @@ _KEYWORDS_WEB_FACTS = (
 
 
 @dataclass(frozen=True)
+class AdvisorSuggestion:
+    """External route suggestion produced by an advisor hook."""
+
+    work_class: str
+    confidence: float = 1.0
+    source: str = "advisor"
+    metadata: Optional[Mapping[str, Any]] = None
+
+
+_ROUTE_ADVISORS: list[Any] = []
+
+
+def register_route_advisor(advisor: Any) -> None:
+    """Register an external route advisor hook."""
+    if advisor not in _ROUTE_ADVISORS:
+        _ROUTE_ADVISORS.append(advisor)
+
+
+def unregister_route_advisor(advisor: Any) -> None:
+    """Remove a previously registered route advisor hook."""
+    if advisor in _ROUTE_ADVISORS:
+        _ROUTE_ADVISORS.remove(advisor)
+
+
+def clear_route_advisors() -> None:
+    """Clear all registered route advisor hooks."""
+    _ROUTE_ADVISORS.clear()
+
+
+def get_route_advisors() -> list[Any]:
+    """Return a shallow copy of registered route advisor hooks."""
+    return list(_ROUTE_ADVISORS)
+
+
+@dataclass(frozen=True)
 class RouteDecision:
     """Routing outcome for a single subtask before any card is claimed."""
 
@@ -132,6 +167,12 @@ class RouteDecision:
     requested_provider: Optional[str] = None
     overridden_model_wish: bool = False
     blocked_reason: Optional[str] = None
+    rule_class: Optional[str] = None
+    advisor_class: Optional[str] = None
+    advisor_conf: Optional[float] = None
+    advisor_source: Optional[str] = "disabled"
+    advisor_lane: Optional[str] = None
+    rule_lane: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -444,25 +485,87 @@ def route_subtask(
     counts = usage_counts if usage_counts is not None else {}
 
     req_model, req_provider = _extract_model_wishes(subtask)
-    work_class = infer_work_class(subtask, ru_mode=active_ru)
-    ladder = _ladder_for_class(work_class)
+    rule_class = infer_work_class(subtask, ru_mode=active_ru)
 
     eligible_by_base: dict[str, list[Mapping[str, Any]]] = {}
     rejection_reasons: list[str] = []
+    allowed_lanes: list[str] = []
     for row in rows:
         ok, reason = is_lane_eligible(row, ru_mode=active_ru, allowlist=allowlist)
         base = base_lane_name(str(row.get("lane") or ""))
         if ok:
             eligible_by_base.setdefault(base, []).append(row)
+            allowed_lanes.append(str(row.get("lane") or base))
         elif reason:
             rejection_reasons.append(f"{row.get('lane')}:{reason}")
 
-    for step_base in ladder:
+    # Neutral route advisor hook
+    adv_sug: Optional[AdvisorSuggestion] = None
+    advisor_source: str = "disabled"
+    advisor_class: Optional[str] = None
+    advisor_conf: Optional[float] = None
+
+    if _ROUTE_ADVISORS:
+        adv = _ROUTE_ADVISORS[0]
+        try:
+            if hasattr(adv, "advise"):
+                res = adv.advise(subtask, allowed_lanes)
+            elif callable(adv):
+                res = adv(subtask, allowed_lanes)
+            else:
+                res = None
+            if isinstance(res, AdvisorSuggestion):
+                adv_sug = res
+            elif isinstance(res, tuple) and len(res) >= 2:
+                adv_sug = AdvisorSuggestion(work_class=str(res[0]), confidence=float(res[1]))
+            elif isinstance(res, str):
+                adv_sug = AdvisorSuggestion(work_class=res)
+        except Exception:
+            # Advisor failure -> source=fallback, rule lane is maintained
+            adv_sug = AdvisorSuggestion(work_class=rule_class, confidence=0.0, source="fallback")
+
+    if adv_sug is not None:
+        advisor_class = adv_sug.work_class if adv_sug.work_class in WORK_CLASSES else rule_class
+        advisor_conf = adv_sug.confidence
+        advisor_source = adv_sug.source or "advisor"
+
+    # Rule ladder and rule slot
+    rule_ladder = _ladder_for_class(rule_class)
+    rule_slot: Optional[Mapping[str, Any]] = None
+    for step_base in rule_ladder:
         slots = eligible_by_base.get(step_base)
-        if not slots:
-            continue
-        chosen = _select_best_slot(slots, counts)
-        lane = str(chosen.get("lane") or step_base)
+        if slots:
+            rule_slot = _select_best_slot(slots, counts)
+            break
+    rule_lane = str(rule_slot.get("lane") or "") if rule_slot is not None else None
+
+    # Advisor ladder and advisor slot (table lookup "class -> lane", whitelist and window remainder)
+    advisor_lane: Optional[str] = None
+    advisor_slot: Optional[Mapping[str, Any]] = None
+    if advisor_class is not None:
+        adv_ladder = _ladder_for_class(advisor_class)
+        for step_base in adv_ladder:
+            slots = eligible_by_base.get(step_base)
+            if slots:
+                advisor_slot = _select_best_slot(slots, counts)
+                advisor_lane = str(advisor_slot.get("lane") or step_base)
+                break
+
+    # Determine assigned lane:
+    # If advisor is active and has a valid eligible slot -> use advisor_slot;
+    # Otherwise (shadow mode, disabled, fallback, or advisor lane unroutable) -> use rule_slot.
+    chosen: Optional[Mapping[str, Any]] = None
+    chosen_class: str = rule_class
+    if advisor_source == "active" and advisor_slot is not None:
+        chosen = advisor_slot
+        chosen_class = advisor_class
+    elif rule_slot is not None:
+        chosen = rule_slot
+        chosen_class = rule_class
+
+    decision: Optional[RouteDecision] = None
+    if chosen is not None:
+        lane = str(chosen.get("lane") or chosen_class)
         counts[lane] = int(counts.get(lane, 0)) + 1
         provider_override, model_override = canonical_lane_model(chosen)
         _rank, _left, win_state = window_tier(chosen.get("window_left"))
@@ -471,44 +574,65 @@ def route_subtask(
             (req_model is not None and req_model != model_override)
             or (req_provider is not None and req_provider != provider_override)
         )
-        return RouteDecision(
+        decision = RouteDecision(
             lane=lane,
             assignee=canonical_assignee(lane),
             provider_override=provider_override,
             model_override=model_override,
-            work_class=work_class,
+            work_class=chosen_class,
             billing=billing,
             window_state=win_state,
             requested_model=req_model,
             requested_provider=req_provider,
             overridden_model_wish=overridden,
             blocked_reason=None,
+            rule_class=rule_class,
+            advisor_class=advisor_class,
+            advisor_conf=advisor_conf,
+            advisor_source=advisor_source,
+            advisor_lane=advisor_lane,
+            rule_lane=rule_lane,
+        )
+    else:
+        # Fallback when no lane is eligible
+        fallback_base = "yandex" if active_ru.enabled else rule_ladder[0]
+        fallback_provider, fallback_model = LANE_MODELS.get(fallback_base, LANE_MODELS["claude-code"])
+        validate_model_override(fallback_model, fallback_provider)
+        overridden = bool(
+            (req_model is not None and req_model != fallback_model)
+            or (req_provider is not None and req_provider != fallback_provider)
+        )
+        reason_summary = ", ".join(rejection_reasons) if rejection_reasons else "no_eligible_lane"
+        decision = RouteDecision(
+            lane=fallback_base,
+            assignee=canonical_assignee(fallback_base),
+            provider_override=fallback_provider,
+            model_override=fallback_model,
+            work_class=rule_class,
+            billing=capabilities.METERED if fallback_base != "tool" else capabilities.FREE,
+            window_state=WINDOW_UNROUTABLE,
+            requested_model=req_model,
+            requested_provider=req_provider,
+            overridden_model_wish=overridden,
+            blocked_reason=f"no_eligible_lane ({reason_summary})",
+            rule_class=rule_class,
+            advisor_class=advisor_class,
+            advisor_conf=advisor_conf,
+            advisor_source=advisor_source,
+            advisor_lane=advisor_lane,
+            rule_lane=rule_lane,
         )
 
-    # Ни одна дорожка не прошла фильтры (например, ru_only без живого yandex или все окна >= 90 %):
-    # карточка всё равно получает каноническую пару целевой дорожки 1-й ступени, но помечается
-    # причиной блокировки до взятия в работу.
-    fallback_base = "yandex" if active_ru.enabled else ladder[0]
-    fallback_provider, fallback_model = LANE_MODELS.get(fallback_base, LANE_MODELS["claude-code"])
-    validate_model_override(fallback_model, fallback_provider)
-    overridden = bool(
-        (req_model is not None and req_model != fallback_model)
-        or (req_provider is not None and req_provider != fallback_provider)
-    )
-    reason_summary = ", ".join(rejection_reasons) if rejection_reasons else "no_eligible_lane"
-    return RouteDecision(
-        lane=fallback_base,
-        assignee=canonical_assignee(fallback_base),
-        provider_override=fallback_provider,
-        model_override=fallback_model,
-        work_class=work_class,
-        billing=capabilities.METERED if fallback_base != "tool" else capabilities.FREE,
-        window_state=WINDOW_UNROUTABLE,
-        requested_model=req_model,
-        requested_provider=req_provider,
-        overridden_model_wish=overridden,
-        blocked_reason=f"no_eligible_lane ({reason_summary})",
-    )
+    # Notify route advisors (e.g. shadow logging / pair scheduling)
+    if _ROUTE_ADVISORS:
+        for adv_hook in _ROUTE_ADVISORS:
+            if hasattr(adv_hook, "on_routed"):
+                try:
+                    adv_hook.on_routed(subtask, decision)
+                except Exception:
+                    pass
+
+    return decision
 
 
 def route_subtasks(
@@ -532,3 +656,171 @@ def route_subtasks(
         )
         for subtask in subtasks
     ]
+
+
+# ---------------------------------------------------------------------------
+# Канон моделей октября 2026 (CANONICAL_OCT_2026_POOL)
+# ---------------------------------------------------------------------------
+
+CANONICAL_OCT_2026_POOL: dict[str, tuple[str, ...]] = {
+    "anthropic": (
+        "claude-opus-5-5",
+        "claude-fable-5-1",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5-20251001",
+    ),
+    "openai": (
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+    ),
+    "gemini": (
+        "gemini-3.1-pro-preview",
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+    ),
+    "deepseek": (
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-flash",
+    ),
+    "kimi": (
+        "kimi-k3",
+        "kimi-k2.7-code",
+        "kimi-k2.7-code-highspeed",
+        "kimi-k2.6",
+    ),
+    "ru": (
+        "yandexgpt",
+        "yandexgpt-lite",
+        "gigachat",
+        "gigachat-pro",
+        "gigachat-max",
+    ),
+}
+
+_CANONICAL_2026_BY_WORK_CLASS: dict[str, tuple[str, ...]] = {
+    WORK_REPO: (
+        "claude-fable-5-1",
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "gpt-6.1-sol",
+        "deepseek-v4-pro",
+        "kimi-k3",
+    ),
+    WORK_PRECISE_PATCH: (
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "kimi-k2.7-code",
+        "claude-sonnet-5-5",
+        "deepseek-v4-pro",
+    ),
+    WORK_BULK_CHEAP: (
+        "deepseek-v4-flash",
+        "gpt-5.6-luna",
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "claude-haiku-5-5",
+    ),
+    WORK_LARGE_READING: (
+        "gemini-3.1-pro-preview",
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "claude-sonnet-5-5",
+        "gpt-5.4",
+    ),
+    WORK_WEB_FACTS: (
+        "gemini-3.8-flash",
+        "claude-sonnet-5-5",
+        "gpt-5.6-sol",
+        "deepseek-v4-flash",
+    ),
+    WORK_RU_CONTOUR: (
+        "yandexgpt",
+        "gigachat-max",
+        "gigachat-pro",
+        "yandexgpt-lite",
+    ),
+    WORK_DETERMINISTIC: ("tool",),
+}
+
+_ALL_CANONICAL_2026_MODELS: frozenset[str] = frozenset(
+    m for group in CANONICAL_OCT_2026_POOL.values() for m in group
+)
+
+
+def select_canonical_2026_model(
+    work_class: str,
+    quota_utilization_5h: float = 0.0,
+    quota_utilization_7d: float = 0.0,
+    cache_warm_model: Optional[str] = None,
+    context_tokens: int = 0,
+) -> str:
+    """Выбрать актуальную модель из пула октября 2026 по классу задачи, квотам и контексту."""
+    norm_class = (work_class or "").strip().lower()
+    if norm_class == WORK_DETERMINISTIC:
+        return "tool"
+    if norm_class == WORK_RU_CONTOUR:
+        return "yandexgpt"
+
+    max_util = max(float(quota_utilization_5h or 0.0), float(quota_utilization_7d or 0.0))
+    if max_util > 1.0:
+        max_util = max_util / 100.0
+
+    if cache_warm_model and cache_warm_model in _ALL_CANONICAL_2026_MODELS and max_util < 0.90:
+        if int(context_tokens or 0) <= 200_000 or cache_warm_model in (
+            "claude-opus-5-5",
+            "claude-fable-5-1",
+            "claude-sonnet-5-5",
+            "gemini-3.1-pro-preview",
+            "gemini-3.8-flash",
+            "gpt-5.4",
+        ):
+            return cache_warm_model
+
+    if int(context_tokens or 0) > 400_000:
+        if max_util >= 0.85 or norm_class == WORK_LARGE_READING:
+            return "gemini-3.1-pro-preview"
+        return "claude-sonnet-5-5"
+
+    if max_util >= 0.90:
+        if norm_class in (WORK_PRECISE_PATCH, "codex_patch"):
+            return "kimi-k2.7-code"
+        if norm_class in (WORK_LARGE_READING, "large_context"):
+            return "gemini-3.8-flash"
+        if norm_class in (WORK_BULK_CHEAP,):
+            return "deepseek-v4-flash"
+        return "deepseek-v4-pro"
+
+    if max_util >= 0.70:
+        if norm_class in (WORK_REPO, "long_repo", "orchestration"):
+            return "claude-sonnet-5-5"
+        if norm_class in (WORK_PRECISE_PATCH, "codex_patch"):
+            return "gpt-5.6-sol"
+        if norm_class in (WORK_LARGE_READING, "large_context"):
+            return "gemini-3.8-flash"
+        return "deepseek-v4-flash"
+
+    ladder = _CANONICAL_2026_BY_WORK_CLASS.get(norm_class)
+    if ladder:
+        return ladder[0]
+    if norm_class in ("architecture", "synthesis", "review_judge", "judge"):
+        return "claude-opus-5-5"
+    if norm_class in ("long_repo", "orchestration"):
+        return "claude-fable-5-1"
+    if norm_class in ("codex_patch",):
+        return "gpt-6.1-sol"
+    if norm_class in ("large_context",):
+        return "gemini-3.1-pro-preview"
+    return "claude-fable-5-1"
+

@@ -386,21 +386,47 @@ def _stat_fingerprint(entries: list[tuple[Path, tuple[str, ...]]], stats: Stats)
     return digest.hexdigest()
 
 
+def _hash_file_entry(args: tuple[str, Path]) -> str:
+    rel, item = args
+    file_hash = hashlib.sha256()
+    with item.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            file_hash.update(chunk)
+    return f"F {rel} {file_hash.hexdigest()}\n"
+
+
 def _content_fingerprint(entries: list[tuple[Path, tuple[str, ...]]]) -> str:
-    digest = hashlib.sha256()
+    from concurrent.futures import ThreadPoolExecutor
+
+    lines: list[Optional[str]] = []
+    file_tasks: list[tuple[int, str, Path]] = []
     for path, parts in sorted(entries, key=lambda e: e[1]):
-        items = [(path, ())] if path.is_file() else [
-            (p, p.relative_to(path).parts) for p in sorted(path.rglob("*"))]
-        for item, sub in items:
-            rel = "/".join(parts + sub)
-            if item.is_dir():
-                digest.update(f"D {rel}\n".encode("utf-8"))
-                continue
-            file_hash = hashlib.sha256()
-            with item.open("rb") as fh:
-                for chunk in iter(lambda: fh.read(1 << 20), b""):
-                    file_hash.update(chunk)
-            digest.update(f"F {rel} {file_hash.hexdigest()}\n".encode("utf-8"))
+        if path.is_file():
+            rel = "/".join(parts)
+            file_tasks.append((len(lines), rel, path))
+            lines.append(None)
+        else:
+            walked = [(path.joinpath(*sub), sub, stat.S_ISDIR(st.st_mode))
+                      for sub, st in _walk(path) if sub]
+            walked.sort(key=lambda x: x[0])
+            for item, sub, is_dir in walked:
+                rel = "/".join(parts + sub)
+                if is_dir:
+                    lines.append(f"D {rel}\n")
+                else:
+                    file_tasks.append((len(lines), rel, item))
+                    lines.append(None)
+    if file_tasks:
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            for (idx, _, _), hashed_line in zip(
+                file_tasks,
+                pool.map(_hash_file_entry, [(rel, item) for _, rel, item in file_tasks]),
+            ):
+                lines[idx] = hashed_line
+    digest = hashlib.sha256()
+    for line in lines:
+        if line is not None:
+            digest.update(line.encode("utf-8"))
     return digest.hexdigest()
 
 
@@ -479,18 +505,30 @@ def _refuse_linked_targets(home: Path, plan: list[_Root]) -> None:
                                    "through it; replace it with a real directory")
 
 
+def _stage_one_root(root: _Root) -> None:
+    assert root.src is not None and root.staged is not None
+    if root.src.is_dir():
+        shutil.copytree(root.src, root.staged)
+    else:
+        shutil.copy2(root.src, root.staged)
+
+
 def _stage(plan: list[_Root], stage: Path) -> None:
     """Copy every new root next to the profile first: a failure here changes nothing."""
+    from concurrent.futures import ThreadPoolExecutor
+
     new = stage / "new"
     new.mkdir(parents=True)
+    roots_to_copy: list[_Root] = []
     for index, root in enumerate(plan):
         if root.src is None:
             continue
         root.staged = new / str(index)
-        if root.src.is_dir():
-            shutil.copytree(root.src, root.staged)
-        else:
-            shutil.copy2(root.src, root.staged)
+        roots_to_copy.append(root)
+    if roots_to_copy:
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            for _ in pool.map(_stage_one_root, roots_to_copy):
+                pass
 
 
 def _move(src: Path, dest: Path, attempts: int = 1) -> None:

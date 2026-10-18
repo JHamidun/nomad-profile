@@ -67,6 +67,7 @@ def save_command_allowlist(patterns: Iterable[str], *, home: Path | None = None)
             cleaned.append(s)
     cleaned.sort()
     ui_config.update_global_config({"command_allowlist": cleaned}, raise_on_error=True)
+    _SUGGESTIONS_CACHE.clear()
     return get_command_allowlist(home=home)
 
 
@@ -195,6 +196,9 @@ def evaluate_command_safety(
     }
 
 
+_SUGGESTIONS_CACHE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+
+
 def get_suggestions(
     *,
     days: int = 30,
@@ -215,30 +219,45 @@ def get_suggestions(
             "proposals": [],
         }
 
-    res = ui_cli.run_hermes(
-        [
-            "approvals",
-            "suggest",
-            "--json",
-            "--db",
-            str(db_path),
-            "--days",
-            str(days),
-            "--min-count",
-            str(min_count),
-            "--limit",
-            str(limit),
-        ]
-    )
-    proposals: list[dict[str, Any]] = []
-    if res.get("ok") and res.get("stdout"):
-        try:
-            parsed = json.loads(res["stdout"])
-            if isinstance(parsed, dict) and isinstance(parsed.get("proposals"), list):
-                proposals = parsed["proposals"]
-        except ValueError:
-            proposals = []
+    try:
+        mtime_ns = db_path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    existing_allowlist = set(get_command_allowlist(home=resolved_home))
+    cache_key = (str(db_path), mtime_ns, days, min_count, limit, tuple(sorted(existing_allowlist)))
+    if cache_key in _SUGGESTIONS_CACHE:
+        raw_proposals = list(_SUGGESTIONS_CACHE[cache_key])
+    else:
+        res = ui_cli.run_hermes(
+            [
+                "approvals",
+                "suggest",
+                "--json",
+                "--db",
+                str(db_path),
+                "--days",
+                str(days),
+                "--min-count",
+                str(min_count),
+                "--limit",
+                str(limit),
+            ]
+        )
+        raw_proposals = []
+        if res.get("ok") and res.get("stdout"):
+            try:
+                parsed = json.loads(res["stdout"])
+                if isinstance(parsed, dict) and isinstance(parsed.get("proposals"), list):
+                    raw_proposals = parsed["proposals"]
+            except ValueError:
+                raw_proposals = []
+        _SUGGESTIONS_CACHE[cache_key] = list(raw_proposals)
 
+    proposals = [
+        p
+        for p in raw_proposals
+        if isinstance(p, dict) and not _matches_existing(str(p.get("pattern") or ""), existing_allowlist)
+    ]
     return {
         "ok": True,
         "db": str(db_path),
@@ -246,6 +265,241 @@ def get_suggestions(
         "days": days,
         "min_count": min_count,
         "proposals": proposals,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Корпоративный контур ИБ, DLP-маскирование ПДн (152-ФЗ) и комплаенс CISO
+# ---------------------------------------------------------------------------
+
+DEFAULT_GUARDRAILS: dict[str, Any] = {
+    "preset": "corp_152fz",
+    "ru_only": False,
+    "dlp_enabled": True,
+    "dlp_mode": "mask",  # "mask" | "block" | "audit_only"
+    "mask_fio": True,
+    "mask_passport_inn_snils": True,
+    "mask_cards_accounts": True,
+    "mask_phones_emails": True,
+    "mask_nda_contracts": True,
+    "mask_secrets_tokens": True,
+    "zdr_no_training": True,
+    "os_keychain_encrypt": True,
+    "history_ttl_days": 30,
+    "block_wildcards_ssrf": True,
+    "require_corp_vpn": False,
+    "block_env_exfiltration": True,
+    "siem_syslog_enabled": False,
+    "siem_endpoint": "syslog://siem.company.local:514",
+}
+
+GUARDRAIL_PRESETS: dict[str, dict[str, Any]] = {
+    "startup": {
+        "preset": "startup",
+        "ru_only": False,
+        "dlp_enabled": True,
+        "dlp_mode": "mask",
+        "mask_fio": False,
+        "mask_passport_inn_snils": True,
+        "mask_cards_accounts": True,
+        "mask_phones_emails": False,
+        "mask_nda_contracts": False,
+        "mask_secrets_tokens": True,
+        "zdr_no_training": True,
+        "os_keychain_encrypt": True,
+        "history_ttl_days": 90,
+        "block_wildcards_ssrf": True,
+        "require_corp_vpn": False,
+        "block_env_exfiltration": True,
+    },
+    "corp_152fz": {
+        "preset": "corp_152fz",
+        "ru_only": False,
+        "dlp_enabled": True,
+        "dlp_mode": "mask",
+        "mask_fio": True,
+        "mask_passport_inn_snils": True,
+        "mask_cards_accounts": True,
+        "mask_phones_emails": True,
+        "mask_nda_contracts": True,
+        "mask_secrets_tokens": True,
+        "zdr_no_training": True,
+        "os_keychain_encrypt": True,
+        "history_ttl_days": 30,
+        "block_wildcards_ssrf": True,
+        "require_corp_vpn": False,
+        "block_env_exfiltration": True,
+    },
+    "strict_kii": {
+        "preset": "strict_kii",
+        "ru_only": True,
+        "dlp_enabled": True,
+        "dlp_mode": "block",
+        "mask_fio": True,
+        "mask_passport_inn_snils": True,
+        "mask_cards_accounts": True,
+        "mask_phones_emails": True,
+        "mask_nda_contracts": True,
+        "mask_secrets_tokens": True,
+        "zdr_no_training": True,
+        "os_keychain_encrypt": True,
+        "history_ttl_days": 7,
+        "block_wildcards_ssrf": True,
+        "require_corp_vpn": True,
+        "block_env_exfiltration": True,
+        "siem_syslog_enabled": True,
+    },
+}
+
+
+def get_guardrails_config(*, home: Path | None = None) -> dict[str, Any]:
+    """Вернуть текущие настройки корпоративных гардрейлов ИБ и 152-ФЗ."""
+    cfg_path = (_resolve_home(home) / "config.yaml") if home is not None else None
+    cfg = profile_config.load_strict(cfg_path)
+    if not isinstance(cfg, dict):
+        cfg = {}
+    nomad_sec = cfg.get("nomad") if isinstance(cfg.get("nomad"), dict) else {}
+    saved = nomad_sec.get("guardrails") if isinstance(nomad_sec.get("guardrails"), dict) else {}
+    merged = {**DEFAULT_GUARDRAILS, **saved}
+    if "ru_only" in nomad_sec and isinstance(nomad_sec.get("ru_only"), bool):
+        merged["ru_only"] = nomad_sec["ru_only"]
+    return merged
+
+
+def save_guardrails_config(
+    updates: dict[str, Any],
+    *,
+    home: Path | None = None,
+) -> dict[str, Any]:
+    """Сохранить настройки корпоративных гардрейлов ИБ и 152-ФЗ в `config.yaml`."""
+    resolved_home = _resolve_home(home)
+    cfg_path = resolved_home / "config.yaml"
+    current = get_guardrails_config(home=resolved_home)
+
+    preset_name = str(updates.get("apply_preset") or "").strip()
+    if preset_name and preset_name in GUARDRAIL_PRESETS:
+        current.update(GUARDRAIL_PRESETS[preset_name])
+
+    for key, default_val in DEFAULT_GUARDRAILS.items():
+        if key in updates:
+            val = updates[key]
+            if isinstance(default_val, bool):
+                current[key] = bool(val)
+            elif isinstance(default_val, int):
+                try:
+                    current[key] = max(1, min(3650, int(val)))
+                except (TypeError, ValueError):
+                    pass
+            else:
+                current[key] = str(val or "").strip()
+
+    ru_flag_changed = "ru_only" in updates or (preset_name in GUARDRAIL_PRESETS)
+    ru_enabled = bool(current.get("ru_only", False))
+
+    if ru_flag_changed and ru_enabled:
+        from . import ru_only as _ru_only
+        _ru_only.apply_ru_config(resolved_home)
+
+    cfg = profile_config.load_strict(cfg_path if cfg_path.is_file() else None)
+    if not isinstance(cfg, dict):
+        cfg = {}
+    nomad_sec = dict(cfg.get("nomad")) if isinstance(cfg.get("nomad"), dict) else {}
+    nomad_sec["guardrails"] = dict(current)
+    if ru_flag_changed:
+        nomad_sec["ru_only"] = ru_enabled
+    cfg["nomad"] = nomad_sec
+
+    import yaml as _yaml
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = cfg_path.with_suffix(".yaml.tmp")
+    tmp_path.write_text(_yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    tmp_path.replace(cfg_path)
+    return current
+
+
+def redact_dlp_text(text: str, *, guardrails: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Интерактивный DLP-фильтр 152-ФЗ: находит и маскирует ПДн, реквизиты и секреты до отправки в LLM."""
+    cfg = guardrails or DEFAULT_GUARDRAILS
+    raw = str(text or "")
+    redacted = raw
+    findings: list[dict[str, Any]] = []
+
+    rules: list[tuple[bool, str, str, re.Pattern[str]]] = [
+        (
+            bool(cfg.get("mask_secrets_tokens", True)),
+            "API-ключ / Приватный токен",
+            "[СЕКРЕТ:ТОКЕН_СКРЫТ]",
+            re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|y0_[A-Za-z0-9_-]{12,}|AQVN[A-Za-z0-9_-]{12,}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,})\b"),
+        ),
+        (
+            bool(cfg.get("mask_passport_inn_snils", True)),
+            "СНИЛС РФ (152-ФЗ)",
+            "[ПДн:СНИЛС_РФ]",
+            re.compile(r"\b\d{3}-\d{3}-\d{3}[\s-]\d{2}\b"),
+        ),
+        (
+            bool(cfg.get("mask_passport_inn_snils", True)),
+            "Паспорт РФ (серия и номер)",
+            "[ПДн:ПАСПОРТ_РФ]",
+            re.compile(r"\b\d{2}\s?\d{2}\s№?\s?\d{6}\b"),
+        ),
+        (
+            bool(cfg.get("mask_cards_accounts", True)),
+            "Расчётный счёт РФ / Карта",
+            "[ПДн:БАНК_СЧЁТ]",
+            re.compile(r"\b(?:40702|40802|40817|30101)\d{15}\b|\b(?:\d{4}[\s-]?){3}\d{4}\b"),
+        ),
+        (
+            bool(cfg.get("mask_passport_inn_snils", True)),
+            "ИНН (10/12 цифр)",
+            "[ПДн:ИНН_РФ]",
+            re.compile(r"(?:ИНН\s*[:№]?\s*)(\d{10}|\d{12})\b", re.IGNORECASE),
+        ),
+        (
+            bool(cfg.get("mask_phones_emails", True)),
+            "Телефон / Email (152-ФЗ)",
+            "[ПДн:КОНТАКТ]",
+            re.compile(r"(?:\+7|8)[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}\b|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+        ),
+        (
+            bool(cfg.get("mask_fio", True)),
+            "ФИО физлица (152-ФЗ)",
+            "[ПДн:ФИО]",
+            re.compile(r"\b[А-ЯЁ][а-яё]{2,}(?:ов|ев|ин|ский|цкий|ова|ева|ина|ская|ко|ук|юк)\s+[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{3,}(?:ович|евич|ич|овна|евна|ична)\b"),
+        ),
+        (
+            bool(cfg.get("mask_nda_contracts", True)),
+            "Договор / Коммерческая тайна (NDA)",
+            "[NDA:ДОГОВОР]",
+            re.compile(r"(?:Договор\s*№\s*[А-ЯA-Z0-9/-]+|Коммерческая\s+тайна)", re.IGNORECASE),
+        ),
+    ]
+
+    for enabled, label, replacement, pattern in rules:
+        if not enabled:
+            continue
+        matches = list(pattern.finditer(redacted))
+        if matches:
+            findings.append({"category": label, "count": len(matches), "mask": replacement})
+            redacted = pattern.sub(replacement, redacted)
+
+    blocked = bool(cfg.get("dlp_mode") == "block" and findings)
+    return {
+        "ok": True,
+        "original_length": len(raw),
+        "redacted_text": redacted,
+        "findings": findings,
+        "findings_count": sum(f["count"] for f in findings),
+        "blocked": blocked,
+        "verdict": (
+            "Запрос заблокирован политикой Zero-Trust (обнаружены ПДн / секреты)"
+            if blocked
+            else (
+                f"Обезличено объектов ПДн/секретов: {sum(f['count'] for f in findings)} (152-ФЗ DLP)"
+                if findings
+                else "Персональных данных и секретов не обнаружено — запрос безопасен"
+            )
+        ),
     }
 
 
@@ -365,6 +619,7 @@ def get_safety_overview(
     deny_rules = get_deny_rules(home=resolved_home)
     sug = get_suggestions(days=days, min_count=min_count, limit=limit, home=resolved_home)
     egress = get_egress_overview(home=resolved_home)
+    guardrails = get_guardrails_config(home=resolved_home)
     return {
         "ok": True,
         "db_path": sug["db_path"],
@@ -374,6 +629,7 @@ def get_safety_overview(
         "approvals_deny": deny_rules,
         "proposals": sug["proposals"],
         "egress": egress,
+        "guardrails": guardrails,
     }
 
 
@@ -391,6 +647,23 @@ def build_router() -> APIRouter:
     @router.get("/safety/egress")
     def http_get_egress() -> dict[str, Any]:
         return get_egress_overview()
+
+    @router.get("/safety/guardrails")
+    def http_get_guardrails() -> dict[str, Any]:
+        return {"ok": True, "guardrails": get_guardrails_config()}
+
+    @router.post("/safety/guardrails")
+    @router.put("/safety/guardrails")
+    def http_save_guardrails(payload: dict[str, Any]) -> dict[str, Any]:
+        updated = save_guardrails_config(payload or {})
+        return {"ok": True, "guardrails": updated, **get_safety_overview()}
+
+    @router.post("/safety/dlp/test")
+    @router.post("/safety/dlp-test")
+    def http_test_dlp(payload: dict[str, Any]) -> dict[str, Any]:
+        sample = str((payload or {}).get("text") or "")
+        cfg = get_guardrails_config()
+        return redact_dlp_text(sample, guardrails=cfg)
 
     @router.get("/safety/suggestions")
     def http_get_suggestions(
@@ -445,3 +718,4 @@ def build_router() -> APIRouter:
 
 
 router = build_router()
+
