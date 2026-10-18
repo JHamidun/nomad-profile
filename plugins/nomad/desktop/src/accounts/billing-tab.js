@@ -90,10 +90,19 @@ export async function callNomadApi(ctx, path, options = {}) {
 
   if (ctx && typeof ctx.rest === 'function') {
     try {
-      return await Promise.race([
+      const restRes = await Promise.race([
         ctx.rest(normalizedPath, options),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('rest-timeout')), 650)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('rest-timeout')), 2500)),
       ])
+      const isEmptyAccountsGet =
+        (!options.method || options.method === 'GET') &&
+        normalizedPath === '/accounts' &&
+        (!restRes ||
+          (Array.isArray(restRes.accounts) && restRes.accounts.length === 0) ||
+          (Array.isArray(restRes.items) && restRes.items.length === 0))
+      if (restRes && !isEmptyAccountsGet) {
+        return restRes
+      }
     } catch (_err) {
       // Fallback to direct fetch below
     }
@@ -102,8 +111,40 @@ export async function callNomadApi(ctx, path, options = {}) {
   if (typeof fetch === 'function') {
     const method = options.method || 'GET'
     const headers = { Accept: 'application/json', ...(options.headers || {}) }
-    const sessionToken =
-      (typeof window !== 'undefined' && window.__HERMES_SESSION_TOKEN__) || 'nomad-live-token'
+    let sessionToken =
+      typeof window !== 'undefined' && window.__HERMES_SESSION_TOKEN__
+        ? window.__HERMES_SESSION_TOKEN__
+        : ''
+    let resolvedGatewayOrigin =
+      typeof window !== 'undefined' && window.__HERMES_GATEWAY_BASE_URL__
+        ? window.__HERMES_GATEWAY_BASE_URL__
+        : ''
+    if (
+      (!sessionToken || !resolvedGatewayOrigin) &&
+      typeof window !== 'undefined' &&
+      window.hermesDesktop &&
+      typeof window.hermesDesktop.getConnection === 'function'
+    ) {
+      try {
+        const conn = await window.hermesDesktop.getConnection()
+        if (conn && conn.token) {
+          sessionToken = conn.token
+          window.__HERMES_SESSION_TOKEN__ = conn.token
+        }
+        if (conn && conn.baseUrl) {
+          resolvedGatewayOrigin = String(conn.baseUrl).replace(/\/+$/, '')
+          window.__HERMES_GATEWAY_BASE_URL__ = resolvedGatewayOrigin
+        }
+      } catch (_connErr) {
+        // Ignore IPC error and use fallback token
+      }
+    }
+    if (!sessionToken) {
+      sessionToken =
+        typeof window !== 'undefined' && window.location?.protocol === 'file:'
+          ? 'nomad-live-desktop-token-fixed'
+          : 'nomad-live-token'
+    }
     headers['X-Hermes-Session-Token'] = sessionToken
     if (!headers['Authorization']) {
       headers['Authorization'] = `Bearer ${sessionToken}`
@@ -113,15 +154,28 @@ export async function callNomadApi(ctx, path, options = {}) {
       headers['Content-Type'] = 'application/json'
       body = JSON.stringify(body)
     }
-    const baseUrl =
-      typeof window !== 'undefined' && window.location?.protocol === 'file:'
+    const baseUrl = resolvedGatewayOrigin
+      ? `${resolvedGatewayOrigin}/api/plugins/nomad`
+      : typeof window !== 'undefined' && window.location?.protocol === 'file:'
         ? 'http://127.0.0.1:9129/api/plugins/nomad'
         : '/api/plugins/nomad'
-    const response = await fetch(`${baseUrl}${normalizedPath}`, {
+    let response = await fetch(`${baseUrl}${normalizedPath}`, {
       method,
       headers,
       body,
     })
+    if (response.status === 401 && sessionToken !== 'nomad-live-token') {
+      const retryHeaders = {
+        ...headers,
+        'X-Hermes-Session-Token': 'nomad-live-token',
+        Authorization: 'Bearer nomad-live-token',
+      }
+      response = await fetch(`${baseUrl}${normalizedPath}`, {
+        method,
+        headers: retryHeaders,
+        body,
+      })
+    }
     if (!response.ok) {
       if (response.status === 401 && method === 'GET' && normalizedPath.startsWith('/accounts')) {
         return { accounts: [], items: [] }

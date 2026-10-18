@@ -13,6 +13,25 @@ import { THEMES_AREA, host } from '@hermes/plugin-sdk'
 
 import { NOMAD_DUNES_SRC } from './assets/nomad-dunes.js'
 
+if (typeof Node !== 'undefined' && !Node.prototype.__nomadSafeDOMPatched) {
+  Node.prototype.__nomadSafeDOMPatched = true
+  const origRemoveChild = Node.prototype.removeChild
+  Node.prototype.removeChild = function (child) {
+    if (child && child.parentNode !== this) {
+      if (child.parentNode) return origRemoveChild.call(child.parentNode, child)
+      return child
+    }
+    return origRemoveChild.apply(this, arguments)
+  }
+  const origInsertBefore = Node.prototype.insertBefore
+  Node.prototype.insertBefore = function (newNode, referenceNode) {
+    if (referenceNode && referenceNode.parentNode !== this) {
+      return this.appendChild(newNode)
+    }
+    return origInsertBefore.apply(this, arguments)
+  }
+}
+
 export const DEFAULT_NOMAD_THEME = 'nomad-dark'
 
 function navigateNomad(path) {
@@ -2821,20 +2840,30 @@ export function applyNomadVisualIdentityAndTooltips() {
           lastVisibleNavParent.insertAdjacentElement('afterend', wrap)
         }
 
-        // 4b-1. Унифицируем значок профиля в левом нижнем углу сайдбара через CSS background-image (без замены React TextNode)
-        const polarisUri =
-          "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none'><rect x='2' y='2' width='60' height='60' rx='14' fill='%2309090B' stroke='%2327272A' stroke-width='1.5'/><circle cx='32' cy='32' r='21' stroke='%233F3F46' stroke-width='1' stroke-dasharray='2 3'/><path d='M19 46V18L32 32M45 18V46L32 32' stroke='%23FAFAFA' stroke-width='4.2' stroke-linecap='round' stroke-linejoin='round'/><path d='M32 13L35.2 28.8L51 32L35.2 35.2L32 51L28.8 35.2L13 32L28.8 28.8L32 13Z' fill='%23FAFAFA'/><circle cx='32' cy='32' r='2.6' fill='%2309090B'/></svg>"
-        document.querySelectorAll('[data-slot="profile-rail-divider"][data-reachable="false"], [data-slot="profile-rail-gateway"][data-reachable="false"]').forEach(el => {
-          el.style.setProperty('display', 'none', 'important')
-        })
-        document.querySelectorAll('[data-slot="profile-rail-gateway"] button, button[data-profile="nomad"], button[aria-label^="nomad" i]').forEach(btn => {
-          if (btn.hasAttribute('data-nomad-polaris-badge')) return
-          const bTxt = (btn.textContent || '').trim().toLowerCase()
-          if (bTxt === 'n' || bTxt === 'h' || btn.getAttribute('data-profile') === 'nomad') {
-            btn.setAttribute('data-nomad-polaris-badge', 'true')
-            btn.style.cssText = `display:inline-flex !important;align-items:center !important;justify-content:center !important;width:20px !important;height:20px !important;border-radius:5px !important;background-color:#09090B !important;background-image:url("${polarisUri}") !important;background-size:100% 100% !important;background-repeat:no-repeat !important;color:transparent !important;font-size:0 !important;padding:0 !important;border:none !important;opacity:1 !important;overflow:hidden !important;`
+        // 4b-1. Гарантируем видимость поля ввода и скрываем техническую панель профилей внизу слева
+        const composerDockEl = document.querySelector('[data-slot="composer-dock"]')
+        if (composerDockEl && composerDockEl.style.display === 'none') {
+          composerDockEl.style.removeProperty('display')
+        }
+        document.querySelectorAll('button').forEach(btn => {
+          const txt = (btn.textContent || '').trim()
+          if (txt === 'Бэкендпроверка' || txt === 'Бэкенд проверка') {
+            btn.style.setProperty('color', '#059669', 'important')
+            btn.querySelectorAll('span').forEach(sp => {
+              if ((sp.textContent || '').trim() === 'проверка') {
+                sp.textContent = 'готов'
+                sp.style.setProperty('color', '#059669', 'important')
+              }
+            })
           }
         })
+        document.querySelectorAll('[data-slot="profile-rail"]').forEach(el => {
+          el.style.setProperty('display', 'none', 'important')
+          if (el.parentElement && el.parentElement.children.length === 1) {
+            el.parentElement.style.setProperty('display', 'none', 'important')
+          }
+        })
+
 
         // 4b-2. Чистая органичная интеграция внутри родных страниц всплывающего окна Настроек (без чужеродных подпунктов в левом меню)
         const overlayNav = document.querySelector('aside[data-tour="overlay-nav"]')

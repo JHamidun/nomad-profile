@@ -354,22 +354,35 @@ export function AccountsStatusbarPill({ ctx }) {
 
   useEffect(() => {
     let mounted = true
-    if (!summary.loaded) {
+    let retryTimer = null
+    const fetchSummary = (attempt = 0) => {
       callNomadApi(ctx, '/accounts')
         .then((res) => {
           if (!mounted) return
           const list = normalizeAccountsList(res)
+          if (list.length === 0 && attempt < 3) {
+            retryTimer = setTimeout(() => fetchSummary(attempt + 1), 900)
+            return
+          }
           accountsSummaryAtom.set(computeSummary(list))
         })
         .catch(() => {
           if (!mounted) return
+          if (attempt < 3) {
+            retryTimer = setTimeout(() => fetchSummary(attempt + 1), 900)
+            return
+          }
           accountsSummaryAtom.set({ total: 0, activeIndex: null, activeLabel: null, loaded: true })
         })
     }
+    if (!summary.loaded || summary.total === 0) {
+      fetchSummary(0)
+    }
     return () => {
       mounted = false
+      if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [ctx, summary.loaded])
+  }, [ctx, summary.loaded, summary.total])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return undefined

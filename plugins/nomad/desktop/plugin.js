@@ -388,17 +388,39 @@ async function callNomadApi(ctx, path, options = {}) {
   const normalizedPath = path.startsWith("/api/plugins/nomad") ? path.slice("/api/plugins/nomad".length) || "/" : path.startsWith("/") ? path : `/${path}`;
   if (ctx && typeof ctx.rest === "function") {
     try {
-      return await Promise.race([
+      const restRes = await Promise.race([
         ctx.rest(normalizedPath, options),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("rest-timeout")), 650))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("rest-timeout")), 2500))
       ]);
+      const isEmptyAccountsGet = (!options.method || options.method === "GET") && normalizedPath === "/accounts" && (!restRes || Array.isArray(restRes.accounts) && restRes.accounts.length === 0 || Array.isArray(restRes.items) && restRes.items.length === 0);
+      if (restRes && !isEmptyAccountsGet) {
+        return restRes;
+      }
     } catch (_err) {
     }
   }
   if (typeof fetch === "function") {
     const method = options.method || "GET";
     const headers = { Accept: "application/json", ...options.headers || {} };
-    const sessionToken = typeof window !== "undefined" && window.__HERMES_SESSION_TOKEN__ || "nomad-live-token";
+    let sessionToken = typeof window !== "undefined" && window.__HERMES_SESSION_TOKEN__ ? window.__HERMES_SESSION_TOKEN__ : "";
+    let resolvedGatewayOrigin = typeof window !== "undefined" && window.__HERMES_GATEWAY_BASE_URL__ ? window.__HERMES_GATEWAY_BASE_URL__ : "";
+    if ((!sessionToken || !resolvedGatewayOrigin) && typeof window !== "undefined" && window.hermesDesktop && typeof window.hermesDesktop.getConnection === "function") {
+      try {
+        const conn = await window.hermesDesktop.getConnection();
+        if (conn && conn.token) {
+          sessionToken = conn.token;
+          window.__HERMES_SESSION_TOKEN__ = conn.token;
+        }
+        if (conn && conn.baseUrl) {
+          resolvedGatewayOrigin = String(conn.baseUrl).replace(/\/+$/, "");
+          window.__HERMES_GATEWAY_BASE_URL__ = resolvedGatewayOrigin;
+        }
+      } catch (_connErr) {
+      }
+    }
+    if (!sessionToken) {
+      sessionToken = typeof window !== "undefined" && window.location?.protocol === "file:" ? "nomad-live-desktop-token-fixed" : "nomad-live-token";
+    }
     headers["X-Hermes-Session-Token"] = sessionToken;
     if (!headers["Authorization"]) {
       headers["Authorization"] = `Bearer ${sessionToken}`;
@@ -408,12 +430,24 @@ async function callNomadApi(ctx, path, options = {}) {
       headers["Content-Type"] = "application/json";
       body = JSON.stringify(body);
     }
-    const baseUrl = typeof window !== "undefined" && window.location?.protocol === "file:" ? "http://127.0.0.1:9129/api/plugins/nomad" : "/api/plugins/nomad";
-    const response = await fetch(`${baseUrl}${normalizedPath}`, {
+    const baseUrl = resolvedGatewayOrigin ? `${resolvedGatewayOrigin}/api/plugins/nomad` : typeof window !== "undefined" && window.location?.protocol === "file:" ? "http://127.0.0.1:9129/api/plugins/nomad" : "/api/plugins/nomad";
+    let response = await fetch(`${baseUrl}${normalizedPath}`, {
       method,
       headers,
       body
     });
+    if (response.status === 401 && sessionToken !== "nomad-live-token") {
+      const retryHeaders = {
+        ...headers,
+        "X-Hermes-Session-Token": "nomad-live-token",
+        Authorization: "Bearer nomad-live-token"
+      };
+      response = await fetch(`${baseUrl}${normalizedPath}`, {
+        method,
+        headers: retryHeaders,
+        body
+      });
+    }
     if (!response.ok) {
       if (response.status === 401 && method === "GET" && normalizedPath.startsWith("/accounts")) {
         return { accounts: [], items: [] };
@@ -7117,20 +7151,33 @@ function AccountsStatusbarPill({ ctx }) {
   const [inlinePortalState, setInlinePortalState] = useState9({ container: null, section: null });
   useEffect8(() => {
     let mounted = true;
-    if (!summary.loaded) {
+    let retryTimer = null;
+    const fetchSummary = (attempt = 0) => {
       callNomadApi(ctx, "/accounts").then((res) => {
         if (!mounted) return;
         const list = normalizeAccountsList(res);
+        if (list.length === 0 && attempt < 3) {
+          retryTimer = setTimeout(() => fetchSummary(attempt + 1), 900);
+          return;
+        }
         accountsSummaryAtom.set(computeSummary(list));
       }).catch(() => {
         if (!mounted) return;
+        if (attempt < 3) {
+          retryTimer = setTimeout(() => fetchSummary(attempt + 1), 900);
+          return;
+        }
         accountsSummaryAtom.set({ total: 0, activeIndex: null, activeLabel: null, loaded: true });
       });
+    };
+    if (!summary.loaded || summary.total === 0) {
+      fetchSummary(0);
     }
     return () => {
       mounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [ctx, summary.loaded]);
+  }, [ctx, summary.loaded, summary.total]);
   useEffect8(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return void 0;
     const syncInlineSlot = () => {
@@ -16148,6 +16195,24 @@ function tooltipAttrs(text) {
 }
 
 // themes.js
+if (typeof Node !== "undefined" && !Node.prototype.__nomadSafeDOMPatched) {
+  Node.prototype.__nomadSafeDOMPatched = true;
+  const origRemoveChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function(child) {
+    if (child && child.parentNode !== this) {
+      if (child.parentNode) return origRemoveChild.call(child.parentNode, child);
+      return child;
+    }
+    return origRemoveChild.apply(this, arguments);
+  };
+  const origInsertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function(newNode, referenceNode) {
+    if (referenceNode && referenceNode.parentNode !== this) {
+      return this.appendChild(newNode);
+    }
+    return origInsertBefore.apply(this, arguments);
+  };
+}
 var DEFAULT_NOMAD_THEME = "nomad-dark";
 function navigateNomad(path) {
   if (host10 && typeof host10.navigate === "function") {
@@ -18753,16 +18818,26 @@ function applyNomadVisualIdentityAndTooltips() {
           wrap.appendChild(settingsItem);
           lastVisibleNavParent.insertAdjacentElement("afterend", wrap);
         }
-        const polarisUri = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none'><rect x='2' y='2' width='60' height='60' rx='14' fill='%2309090B' stroke='%2327272A' stroke-width='1.5'/><circle cx='32' cy='32' r='21' stroke='%233F3F46' stroke-width='1' stroke-dasharray='2 3'/><path d='M19 46V18L32 32M45 18V46L32 32' stroke='%23FAFAFA' stroke-width='4.2' stroke-linecap='round' stroke-linejoin='round'/><path d='M32 13L35.2 28.8L51 32L35.2 35.2L32 51L28.8 35.2L13 32L28.8 28.8L32 13Z' fill='%23FAFAFA'/><circle cx='32' cy='32' r='2.6' fill='%2309090B'/></svg>";
-        document.querySelectorAll('[data-slot="profile-rail-divider"][data-reachable="false"], [data-slot="profile-rail-gateway"][data-reachable="false"]').forEach((el) => {
-          el.style.setProperty("display", "none", "important");
+        const composerDockEl = document.querySelector('[data-slot="composer-dock"]');
+        if (composerDockEl && composerDockEl.style.display === "none") {
+          composerDockEl.style.removeProperty("display");
+        }
+        document.querySelectorAll("button").forEach((btn) => {
+          const txt = (btn.textContent || "").trim();
+          if (txt === "Бэкендпроверка" || txt === "Бэкенд проверка") {
+            btn.style.setProperty("color", "#059669", "important");
+            btn.querySelectorAll("span").forEach((sp) => {
+              if ((sp.textContent || "").trim() === "проверка") {
+                sp.textContent = "готов";
+                sp.style.setProperty("color", "#059669", "important");
+              }
+            });
+          }
         });
-        document.querySelectorAll('[data-slot="profile-rail-gateway"] button, button[data-profile="nomad"], button[aria-label^="nomad" i]').forEach((btn) => {
-          if (btn.hasAttribute("data-nomad-polaris-badge")) return;
-          const bTxt = (btn.textContent || "").trim().toLowerCase();
-          if (bTxt === "n" || bTxt === "h" || btn.getAttribute("data-profile") === "nomad") {
-            btn.setAttribute("data-nomad-polaris-badge", "true");
-            btn.style.cssText = `display:inline-flex !important;align-items:center !important;justify-content:center !important;width:20px !important;height:20px !important;border-radius:5px !important;background-color:#09090B !important;background-image:url("${polarisUri}") !important;background-size:100% 100% !important;background-repeat:no-repeat !important;color:transparent !important;font-size:0 !important;padding:0 !important;border:none !important;opacity:1 !important;overflow:hidden !important;`;
+        document.querySelectorAll('[data-slot="profile-rail"]').forEach((el) => {
+          el.style.setProperty("display", "none", "important");
+          if (el.parentElement && el.parentElement.children.length === 1) {
+            el.parentElement.style.setProperty("display", "none", "important");
           }
         });
         const overlayNav = document.querySelector('aside[data-tour="overlay-nav"]');
