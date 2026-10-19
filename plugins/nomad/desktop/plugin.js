@@ -18715,9 +18715,10 @@ function applyNomadVisualIdentityAndTooltips() {
         document.documentElement.style.setProperty("--composer-ring", "rgba(24, 24, 27, 0.16)", "important");
         document.documentElement.style.setProperty("--radius", "8px", "important");
       }
-      const textContainers = document.querySelectorAll(
+      const _isRuLocale = (document.documentElement.lang || localStorage.getItem("hermes-locale") || "ru").toLowerCase().startsWith("ru");
+      const textContainers = _isRuLocale ? document.querySelectorAll(
         '[data-slot="aui_intro"] p, [role="tab"], button, span, div, label, p, summary, strong, h3, h4'
-      );
+      ) : [];
       for (const el of textContainers) {
         const raw = (el.textContent || "").trim();
         if (el.childElementCount === 0 && ENGLISH_TO_RUSSIAN_TEXT_MAP[raw]) {
@@ -18743,7 +18744,7 @@ function applyNomadVisualIdentityAndTooltips() {
           });
         }
       }
-      document.querySelectorAll("textarea, input, [data-placeholder]").forEach((el) => {
+      if (_isRuLocale) document.querySelectorAll("textarea, input, [data-placeholder]").forEach((el) => {
         const ph = (el.getAttribute("placeholder") || "").trim();
         if (ph && ENGLISH_TO_RUSSIAN_TEXT_MAP[ph]) {
           el.setAttribute("placeholder", ENGLISH_TO_RUSSIAN_TEXT_MAP[ph]);
@@ -19220,7 +19221,7 @@ function applyNomadVisualIdentityAndTooltips() {
             const syncCouncilBtnUI = () => {
               const st = window.__nomadComposerCouncilState;
               councilBtn.setAttribute("data-active", st.enabled ? "true" : "false");
-              councilBtn.innerHTML = `<span style="font-size:12px;">⚖</span><span>Совет моделей${st.enabled ? ` · ${st.models.length}` : ""}</span>`;
+              const _cLbl = (document.documentElement.lang || localStorage.getItem("hermes-locale") || "ru").toLowerCase().startsWith("ru") ? "Совет моделей" : "Model Council"; councilBtn.innerHTML = `<span style="font-size:12px;">⚖</span><span>${_cLbl}${st.enabled ? ` · ${st.models.length}` : ""}</span>`;
             };
             syncCouncilBtnUI();
             if (modelBtn.nextSibling) {
@@ -19413,6 +19414,122 @@ function applyNomadVisualIdentityAndTooltips() {
           el.setAttribute("data-nomad-tooltip", tip);
         }
       }
+      const MODEL_DROPDOWN_META = {
+        "NomadNet Auto": { desc: "Умный Fugu/Jev роутер по сложности задачи", price: "Авто · -68%" },
+        "nomadnet-auto": { desc: "Умный Fugu/Jev роутер по сложности задачи", price: "Авто · -68%" },
+        "Fable 5.1": { desc: "Агентский флагман · сложный код и тулы · 1M", price: "$6 / $30" },
+        "claude-fable-5-1": { desc: "Агентский флагман · сложный код и тулы · 1M", price: "$6 / $30" },
+        "claude-fable-5.1": { desc: "Агентский флагман · сложный код и тулы · 1M", price: "$6 / $30" },
+        "Fable 5": { desc: "Агентская разработка и оркестрация · 1M", price: "$5 / $25" },
+        "claude-fable-5": { desc: "Агентская разработка и оркестрация · 1M", price: "$5 / $25" },
+        "Opus 5.5": { desc: "Максимум рассуждений и архитектуры · 1M", price: "$5 / $25" },
+        "claude-opus-5-5": { desc: "Максимум рассуждений и архитектуры · 1M", price: "$5 / $25" },
+        "Opus 5": { desc: "Глубокая аналитика и рефакторинг · 1M", price: "$5 / $25" },
+        "claude-opus-5": { desc: "Глубокая аналитика и рефакторинг · 1M", price: "$5 / $25" },
+        "Sonnet 5.5": { desc: "Оптимальный баланс скорости и кода · 1M", price: "$3 / $15" },
+        "claude-sonnet-5-5": { desc: "Оптимальный баланс скорости и кода · 1M", price: "$3 / $15" },
+        "Sonnet 5": { desc: "Быстрый продакшн-код и диалоги · 1M", price: "$3 / $15" },
+        "claude-sonnet-5": { desc: "Быстрый продакшн-код и диалоги · 1M", price: "$3 / $15" },
+        "Haiku 5.5": { desc: "Мгновенные ответы и лёгкие правки · 200K", price: "$0.8 / $4" },
+        "claude-haiku-5-5": { desc: "Мгновенные ответы и лёгкие правки · 200K", price: "$0.8 / $4" },
+        "GPT-6.1-sol": { desc: "Флагман кода и агентики · 400K контекст", price: "$2.5 / $10" },
+        "GPT-6.1-sol-900k": { desc: "Флагман кода · длинный контекст 900K", price: "$2.5 / $10" },
+        "GPT-6-astra": { desc: "Глубокий исследовательский разум · 400K", price: "$5 / $20" },
+        "GPT-6-astra-900k": { desc: "Глубокий разум · весь репозиторий 900K", price: "$5 / $20" },
+        "GPT-6-sol": { desc: "Универсальный флагман инженерии · 400K", price: "$2 / $8" },
+        "GPT-6-sol-900k": { desc: "Инженерный флагман · контекст 900K", price: "$2 / $8" },
+        "GPT-6-luna": { desc: "Быстрая и экономная для рутины · 200K", price: "$0.4 / $1.6" },
+        "GPT-6-luna-900k": { desc: "Быстрая модель · длинный контекст 900K", price: "$0.4 / $1.6" },
+        "GPT-5.6-sol": { desc: "Надёжный кодинг (режим Pro) · 400K", price: "$1.75 / $7" },
+        "GPT-5.6-sol-900k": { desc: "Надёжный кодинг · контекст 900K", price: "$1.75 / $7" },
+        "GPT-5.6-terra": { desc: "Быстрая математика, логика и алгоритмы", price: "$1.25 / $5" },
+        "GPT-5.6-terra-900k": { desc: "Математика и алгоритмы · контекст 900K", price: "$1.25 / $5" },
+        "GPT-5.6-luna": { desc: "Ультра-эконом для частых задач · 200K", price: "$0.25 / $1" },
+        "GPT-5.6-luna-900k": { desc: "Ультра-эконом · длинный контекст 900K", price: "$0.25 / $1" },
+        "GPT-5.5": { desc: "Стабильная универсальная модель · 400K", price: "$2 / $8" },
+        "GPT-5.5-900k": { desc: "Универсальная модель · контекст 900K", price: "$2 / $8" },
+        "GPT-5.4": { desc: "Базовая модель поколения 5.4 · 1.05M", price: "$2.5 / $10" },
+        "GPT-5.4-900k": { desc: "Базовая модель 5.4 · контекст 900K", price: "$2.5 / $10" },
+        "GPT-5.4-mini": { desc: "Лёгкая модель для быстрых правок · 400K", price: "$0.75 / $4.5" },
+        "GPT-5.3 Codex": { desc: "Специализированный агент Codex · 400K", price: "$1.5 / $6" },
+        "GPT-5.3-codex": { desc: "Специализированный агент Codex · 400K", price: "$1.5 / $6" },
+        "GPT-5.3 Codex Spark": { desc: "Быстрый Codex Spark для ChatGPT Pro", price: "Подписка Pro" },
+        "GPT-5.3-codex-spark": { desc: "Быстрый Codex Spark для ChatGPT Pro", price: "Подписка Pro" },
+        "DeepSeek V4 Pro": { desc: "Сильный кодинг и рассуждения · 128K", price: "$0.55 / $2.2" },
+        "deepseek-v4-pro": { desc: "Сильный кодинг и рассуждения · 128K", price: "$0.55 / $2.2" },
+        "DeepSeek": { desc: "Супер-эконом V4 Flash для быстрых задач · 128K", price: "$0.14 / $0.28" },
+        "DeepSeek Flash": { desc: "Супер-эконом V4 Flash для быстрых задач · 128K", price: "$0.14 / $0.28" },
+        "deepseek-flash": { desc: "Супер-эконом V4 Flash для быстрых задач · 128K", price: "$0.14 / $0.28" },
+        "Gemini 3.1 Pro": { desc: "Мультимодальный флагман · 2M контекст", price: "$1.25 / $10" },
+        "Gemini 3.1 Pro Preview": { desc: "Мультимодальный флагман · 2M контекст", price: "$1.25 / $10" },
+        "gemini-3.1-pro-preview": { desc: "Мультимодальный флагман · 2M контекст", price: "$1.25 / $10" },
+        "Gemini 3.8 Flash": { desc: "Новейший быстрый Flash · 1M контекст", price: "$0.3 / $2.4" },
+        "gemini-3.8-flash": { desc: "Новейший быстрый Flash · 1M контекст", price: "$0.3 / $2.4" },
+        "Gemini 3.7 Flash": { desc: "Быстрый код и агентика · 1M контекст", price: "$0.15 / $0.6" },
+        "gemini-3.7-flash": { desc: "Быстрый код и агентика · 1M контекст", price: "$0.15 / $0.6" },
+        "Gemini 3.6 Flash": { desc: "Лёгкий мультимодальный Flash · 1M контекст", price: "$0.1 / $0.4" },
+        "gemini-3.6-flash": { desc: "Лёгкий мультимодальный Flash · 1M контекст", price: "$0.1 / $0.4" },
+        "Kimi K3": { desc: "Глубокий анализ и длинный контекст · 256K", price: "$1 / $4" },
+        "kimi-k3": { desc: "Глубокий анализ и длинный контекст · 256K", price: "$1 / $4" },
+        "Kimi K2.7 Code": { desc: "Специалист по коду и патчам · 256K", price: "$0.6 / $2.5" },
+        "kimi-k2.7-code": { desc: "Специалист по коду и патчам · 256K", price: "$0.6 / $2.5" },
+        "Kimi K2.7 Code Highspeed": { desc: "Турбо-генерация кода (Highspeed) · 256K", price: "$0.6 / $2.5" },
+        "kimi-k2.7-code-highspeed": { desc: "Турбо-генерация кода (Highspeed) · 256K", price: "$0.6 / $2.5" },
+        "Kimi K2.6": { desc: "Быстрая универсальная модель Moonshot · 256K", price: "$0.5 / $2" },
+        "kimi-k2.6": { desc: "Быстрая универсальная модель Moonshot · 256K", price: "$0.5 / $2" },
+        "Grok 4.6": { desc: "Флагман xAI · рассуждения и поиск · 256K", price: "$3 / $15" },
+        "grok-4.6": { desc: "Флагман xAI · рассуждения и поиск · 256K", price: "$3 / $15" },
+        "Grok 4.5": { desc: "Универсальная модель xAI Grok · 256K", price: "$2 / $10" },
+        "grok-4.5": { desc: "Универсальная модель xAI Grok · 256K", price: "$2 / $10" },
+        "Grok Build 0.1": { desc: "Агентская сборка и инженерия xAI · 256K", price: "$2 / $10" },
+        "grok-build-0.1": { desc: "Агентская сборка и инженерия xAI · 256K", price: "$2 / $10" },
+        "Grok Composer 2.5 Fast": { desc: "Быстрый кодогенератор xAI Composer", price: "$0.8 / $4" },
+        "grok-composer-2.5-fast": { desc: "Быстрый кодогенератор xAI Composer", price: "$0.8 / $4" },
+        "MiniMax M3": { desc: "Флагман MiniMax M3 · агентика и речь · 1M", price: "$0.8 / $3.2" },
+        "MiniMax-M3": { desc: "Флагман MiniMax M3 · агентика и речь · 1M", price: "$0.8 / $3.2" },
+        "MiniMax M2.7": { desc: "Быстрый кодинг и диалоги MiniMax · 256K", price: "$0.4 / $1.6" },
+        "MiniMax-M2.7": { desc: "Быстрый кодинг и диалоги MiniMax · 256K", price: "$0.4 / $1.6" },
+        "MiniMax M2.5": { desc: "Эконом-модель MiniMax для частых задач", price: "$0.2 / $0.8" },
+        "MiniMax-M2.5": { desc: "Эконом-модель MiniMax для частых задач", price: "$0.2 / $0.8" },
+        "YandexGPT 5 Pro": { desc: "Суверенный контур РФ · 152-ФЗ · 32K", price: "1 200 ₽ / 1M" },
+        "yandexgpt": { desc: "YandexGPT 5 Pro · Суверенный контур РФ · 152-ФЗ", price: "1 200 ₽ / 1M" },
+        "YandexGPT 5 Lite": { desc: "Быстрая модель Яндекса · 152-ФЗ · 32K", price: "200 ₽ / 1M" },
+        "yandexgpt-lite": { desc: "YandexGPT 5 Lite · Быстрая модель РФ · 152-ФЗ", price: "200 ₽ / 1M" },
+        "GigaChat 2 Max": { desc: "Флагман Сбера · 152-ФЗ · 128K", price: "1 500 ₽ / 1M" },
+        "gigachat-max": { desc: "GigaChat 2 Max · Флагман Сбера · 152-ФЗ", price: "1 500 ₽ / 1M" },
+        "cotype-pro-3": { desc: "МТС Cotype Pro 3 · Корпоративный контур 152-ФЗ", price: "950 ₽ / 1M" },
+        "t-pro-2.0": { desc: "Т-Банк T-Pro 2.0 · Финтех и 152-ФЗ · 128K", price: "850 ₽ / 1M" }
+      };
+      const MODEL_DROPDOWN_META_LOWER = {};
+      Object.keys(MODEL_DROPDOWN_META).forEach((k) => {
+        MODEL_DROPDOWN_META_LOWER[k.toLowerCase()] = MODEL_DROPDOWN_META[k];
+      });
+      document.querySelectorAll('[data-slot="dropdown-menu-content"]').forEach((menu) => {
+        const searchWrap = menu.querySelector('[data-slot="dropdown-menu-search"]');
+        if (!searchWrap) return;
+        const searchInp = searchWrap.querySelector("input");
+        if (searchInp && searchInp.getAttribute("placeholder") !== "Поиск модели (тариф: вход / выход за 1М токенов)…") {
+          searchInp.setAttribute("placeholder", "Поиск модели (тариф: вход / выход за 1М токенов)…");
+        }
+        menu.querySelectorAll('[data-slot="dropdown-menu-sub-trigger"], [data-slot="dropdown-menu-item"]').forEach((item) => {
+          const flexWrap = item.querySelector("span.flex-1");
+          const nameSpan = flexWrap ? flexWrap.querySelector("span.truncate") : item.querySelector("span.truncate");
+          if (!nameSpan) return;
+          const rawName = (nameSpan.textContent || "").trim();
+          const meta = MODEL_DROPDOWN_META[rawName] || MODEL_DROPDOWN_META_LOWER[rawName.toLowerCase()];
+          if (meta) {
+            if (nameSpan.getAttribute("data-nomad-model-desc") !== meta.desc) {
+              nameSpan.setAttribute("data-nomad-model-desc", meta.desc);
+            }
+            if (flexWrap && flexWrap.getAttribute("data-nomad-model-price") !== meta.price) {
+              flexWrap.setAttribute("data-nomad-model-price", meta.price);
+            }
+            if (item.getAttribute("data-nomad-model-price") !== meta.price) {
+              item.setAttribute("data-nomad-model-price", meta.price);
+            }
+          }
+        });
+      });
     } catch {
     }
   };
